@@ -39,6 +39,9 @@ export default function Devis() {
   const [err, setErr] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
+  const [grille, setGrille] = useState([]);
+  const [showGrille, setShowGrille] = useState(false);
+  const [grilleHeures, setGrilleHeures] = useState({});
 
   const canEdit = ['expert', 'chef_mission'].includes(user?.role);
 
@@ -46,8 +49,22 @@ export default function Devis() {
     Promise.all([
       api.get('/devis').then(r => setDevis(r.data)),
       api.get('/clients').then(r => setClients(r.data)),
+      api.get('/parametres/grille-tarifaire').then(r => setGrille(r.data)).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
+
+  const applyGrille = () => {
+    const nouvelles = grille
+      .filter(g => parseFloat(grilleHeures[g.id] || 0) > 0)
+      .map(g => calcLigne({ description: g.libelle, quantite: parseFloat(grilleHeures[g.id]), prixUnitaireHT: parseFloat(g.taux_horaire), remisePct: 0, totalHT: 0 }));
+    if (nouvelles.length === 0) return;
+    setForm(f => ({
+      ...f,
+      lignes: [...f.lignes.filter(l => l.description || l.prixUnitaireHT > 0), ...nouvelles],
+    }));
+    setGrilleHeures({});
+    setShowGrille(false);
+  };
 
   const reload = () => api.get('/devis').then(r => setDevis(r.data));
 
@@ -234,13 +251,43 @@ export default function Devis() {
             <div className="modal-header">
               <span className="modal-title">{modal === 'create' ? 'Nouveau devis' : `Modifier ${modal.numero}`}</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ position: 'relative' }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 12 }}
+                    onClick={() => setShowGrille(v => !v)}
+                    title="Calculer honoraires depuis la grille tarifaire"
+                  >
+                    📊 Grille tarifaire
+                  </button>
+                  {showGrille && grille.length > 0 && (
+                    <div style={{ position: 'absolute', top: 36, right: 0, zIndex: 100, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,.12)', padding: 16, minWidth: 360 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: '#0f1f4b' }}>Calculer honoraires</div>
+                      {grille.map(g => (
+                        <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <div style={{ flex: 1, fontSize: 12 }}>{g.libelle}<br /><span style={{ color: '#6b7c93', fontSize: 11 }}>{parseFloat(g.taux_horaire).toFixed(0)} €/h</span></div>
+                          <input type="number" min="0" step="0.5" placeholder="0h" style={{ width: 70, padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12 }}
+                            value={grilleHeures[g.id] || ''} onChange={e => setGrilleHeures(h => ({ ...h, [g.id]: e.target.value }))} />
+                          <span style={{ fontSize: 11, color: '#6b7c93', width: 70, textAlign: 'right' }}>{fmt(parseFloat(grilleHeures[g.id] || 0) * parseFloat(g.taux_horaire))}</span>
+                        </div>
+                      ))}
+                      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>Total : {fmt(grille.reduce((s, g) => s + parseFloat(grilleHeures[g.id] || 0) * parseFloat(g.taux_horaire), 0))}</span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setShowGrille(false)}>Annuler</button>
+                          <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }} onClick={applyGrille}>Ajouter au devis</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   className="btn btn-ghost btn-sm"
                   style={{ fontSize: 12 }}
                   onClick={() => navigate(`/dimensionnement?returnTo=devis${form.client_id ? `&clientId=${form.client_id}` : ''}`)}
                   title="Calculer les honoraires depuis le dimensionnement"
                 >
-                  📐 Calculer avec le dimensionnement
+                  📐 Dimensionner
                 </button>
                 <button className="modal-close" onClick={() => setModal(null)}>×</button>
               </div>

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
+const CAT_LABELS = { expert: 'Expert-Comptable', chef_mission: 'Chef de Mission', collaborateur: 'Collaborateur', stagiaire: 'Stagiaire', secretaire: 'Secrétaire' };
+
 export default function Parametres() {
   const { user } = useAuth();
   const [form, setForm] = useState({
@@ -16,12 +18,34 @@ export default function Parametres() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [grille, setGrille] = useState([]);
+  const [grilleEdit, setGrilleEdit] = useState({});
+  const [newTarif, setNewTarif] = useState({ categorie: 'collaborateur', libelle: '', taux_horaire: '' });
 
   useEffect(() => {
-    api.get('/parametres').then(r => {
-      if (r.data) setForm(f => ({ ...f, ...r.data }));
-    }).catch(() => {}).finally(() => setLoading(false));
+    Promise.all([
+      api.get('/parametres').then(r => { if (r.data) setForm(f => ({ ...f, ...r.data })); }),
+      api.get('/parametres/grille-tarifaire').then(r => setGrille(r.data)).catch(() => {}),
+    ]).finally(() => setLoading(false));
   }, []);
+
+  const saveGrilleRow = async (id) => {
+    await api.put(`/parametres/grille-tarifaire/${id}`, grilleEdit[id]);
+    setGrilleEdit(e => { const n = { ...e }; delete n[id]; return n; });
+    api.get('/parametres/grille-tarifaire').then(r => setGrille(r.data));
+  };
+
+  const addGrilleRow = async () => {
+    if (!newTarif.libelle || !newTarif.taux_horaire) return;
+    await api.post('/parametres/grille-tarifaire', newTarif);
+    setNewTarif({ categorie: 'collaborateur', libelle: '', taux_horaire: '' });
+    api.get('/parametres/grille-tarifaire').then(r => setGrille(r.data));
+  };
+
+  const deleteGrilleRow = async (id) => {
+    await api.delete(`/parametres/grille-tarifaire/${id}`);
+    setGrille(g => g.filter(r => r.id !== id));
+  };
 
   const save = async () => {
     setSaving(true); setSaved(false);
@@ -129,6 +153,68 @@ export default function Parametres() {
             </div>
             <F label="Mentions légales" name="mentionsLegales" rows={3} placeholder="Mentions légales figurant sur les factures et devis…" />
             <F label="Signature email" name="emailSignature" rows={3} placeholder="Cordialement,\nParFi France…" />
+          </div>
+        </div>
+
+        {/* Grille tarifaire */}
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header"><h3 className="card-title">Grille tarifaire (€/heure)</h3></div>
+          <div className="card-body" style={{ padding: 0 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg)' }}>
+                  <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Catégorie</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Libellé</th>
+                  <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', width: 110 }}>Taux (€/h)</th>
+                  <th style={{ width: 80 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {grille.map(g => (
+                  <tr key={g.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '10px 14px', fontSize: 12 }}><span className="badge badge-autre">{CAT_LABELS[g.categorie] || g.categorie}</span></td>
+                    <td style={{ padding: '10px 14px' }}>
+                      {grilleEdit[g.id] ? (
+                        <input className="form-control" style={{ padding: '4px 8px', fontSize: 12 }} value={grilleEdit[g.id].libelle}
+                          onChange={e => setGrilleEdit(ed => ({ ...ed, [g.id]: { ...ed[g.id], libelle: e.target.value } }))} />
+                      ) : <span style={{ fontSize: 13 }}>{g.libelle}</span>}
+                    </td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                      {grilleEdit[g.id] ? (
+                        <input type="number" className="form-control" style={{ padding: '4px 8px', fontSize: 12, textAlign: 'right', width: 90 }} value={grilleEdit[g.id].taux_horaire}
+                          onChange={e => setGrilleEdit(ed => ({ ...ed, [g.id]: { ...ed[g.id], taux_horaire: e.target.value } }))} />
+                      ) : <strong style={{ fontSize: 14 }}>{parseFloat(g.taux_horaire).toFixed(0)} €</strong>}
+                    </td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        {grilleEdit[g.id] ? (
+                          <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }} onClick={() => saveGrilleRow(g.id)}>✓</button>
+                        ) : (
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setGrilleEdit(ed => ({ ...ed, [g.id]: { libelle: g.libelle, taux_horaire: g.taux_horaire } }))}>✏️</button>
+                        )}
+                        <button className="btn btn-danger btn-sm" style={{ fontSize: 11 }} onClick={() => deleteGrilleRow(g.id)}>🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
+                  <td style={{ padding: '10px 14px' }}>
+                    <select className="form-control" style={{ fontSize: 12, padding: '4px 8px' }} value={newTarif.categorie} onChange={e => setNewTarif(n => ({ ...n, categorie: e.target.value }))}>
+                      {Object.entries(CAT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: '10px 14px' }}>
+                    <input className="form-control" style={{ fontSize: 12, padding: '4px 8px' }} placeholder="Libellé…" value={newTarif.libelle} onChange={e => setNewTarif(n => ({ ...n, libelle: e.target.value }))} />
+                  </td>
+                  <td style={{ padding: '10px 14px' }}>
+                    <input type="number" className="form-control" style={{ fontSize: 12, padding: '4px 8px', textAlign: 'right', width: 90 }} placeholder="€/h" value={newTarif.taux_horaire} onChange={e => setNewTarif(n => ({ ...n, taux_horaire: e.target.value }))} />
+                  </td>
+                  <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                    <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }} onClick={addGrilleRow}>+ Ajouter</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 

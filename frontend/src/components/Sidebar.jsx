@@ -31,11 +31,11 @@ export default function Sidebar() {
           <Link to="/dashboard" icon="🏠" label="Tableau de bord" />
           <Link to="/mon-espace" icon="👤" label="Mon Espace" />
           <Link to="/clients" icon="👥" label="Clients" />
-          <Link to="/missions" icon="🎯" label="Missions" />
+          <Link to="/travaux" icon="🎯" label="Travaux" />
           <Link to="/planning" icon="📆" label="Planning" />
           <Link to="/hub-communication" icon="💬" label="Hub Communication" />
           <Link to="/documents" icon="📁" label="Documents (GED)" />
-          {isExpertOrChef && <Link to="/attributions" icon="🔗" label="Attributions" />}
+          {isExpertOrChef && <Link to="/portefeuille" icon="🔗" label="Portefeuille" />}
         </div>
 
         {isExpertOrChef && (

@@ -6,19 +6,24 @@ const { verifyToken, requireRole } = require('../middleware/auth');
 // GET / — liste des missions
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const { statut, intervenantId, contactId } = req.query;
+    const { statut, intervenantId, contactId, client_id } = req.query;
     let where = '1=1';
     const params = [];
     if (statut) { where += ' AND m.statut = ?'; params.push(statut); }
     if (intervenantId) { where += ' AND m.intervenantId = ?'; params.push(intervenantId); }
     if (contactId) { where += ' AND m.contactId = ?'; params.push(contactId); }
+    if (client_id) { where += ' AND m.client_id = ?'; params.push(client_id); }
     const [rows] = await pool.query(
-      `SELECT m.*, c.raisonSociale AS contactNom, CONCAT(i.prenom, ' ', i.nom) AS intervenantNom
+      `SELECT m.*,
+              cl.nom AS client_nom,
+              c.raisonSociale AS contactNom,
+              CONCAT(i.prenom, ' ', i.nom) AS intervenantNom
        FROM missions m
+       LEFT JOIN clients cl ON m.client_id = cl.id
        LEFT JOIN contacts c ON m.contactId = c.id
        LEFT JOIN intervenants i ON m.intervenantId = i.id
        WHERE ${where}
-       ORDER BY m.createdAt DESC`,
+       ORDER BY COALESCE(cl.nom, c.raisonSociale, 'zzz'), m.createdAt DESC`,
       params
     );
     res.json(rows);
@@ -167,16 +172,22 @@ router.get('/:id/saisies', verifyToken, async (req, res) => {
 });
 
 router.post('/:id/saisies', verifyToken, async (req, res) => {
-  const { date, dureeH, description, facturable } = req.body;
-  if (!date || !dureeH) return res.status(400).json({ message: 'Date et durée requises' });
+  // Accept utilisateur_id from body (Travaux saisie modal) or fall back to authenticated user
+  const { date, dureeH, heures, description, facturable, utilisateur_id } = req.body;
+  const duree = dureeH ?? heures;
+  if (!date || !duree) return res.status(400).json({ message: 'Date et durée requises' });
+  const userId = utilisateur_id || req.user.id;
   try {
     const [r] = await pool.query(
       `INSERT INTO saisies_temps (missionId, utilisateurId, date, dureeH, description, facturable)
        VALUES (?,?,?,?,?,?)`,
-      [req.params.id, req.user.id, date, dureeH, description || null, facturable !== false ? 1 : 0]
+      [req.params.id, userId, date, Number(duree), description || null, facturable !== false ? 1 : 0]
     );
-    // Recalcule temps passé
-    await pool.query('UPDATE missions SET tempsPasseH = (SELECT COALESCE(SUM(dureeH),0) FROM saisies_temps WHERE missionId = ?), updatedAt=NOW() WHERE id = ?', [req.params.id, req.params.id]);
+    // Recalcule temps passé depuis toutes les saisies
+    await pool.query(
+      'UPDATE missions SET tempsPasseH = (SELECT COALESCE(SUM(dureeH),0) FROM saisies_temps WHERE missionId = ?), updatedAt=NOW() WHERE id = ?',
+      [req.params.id, req.params.id]
+    );
     res.status(201).json({ id: r.insertId });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });

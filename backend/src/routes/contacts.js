@@ -24,6 +24,22 @@ router.get('/', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
 
+// GET /personnes — liste des personnes_contact, filtrable par ?client_id= ou ?contact_id=
+router.get('/personnes', verifyToken, async (req, res) => {
+  try {
+    const { client_id, contact_id } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (client_id) { where += ' AND p.client_id = ?'; params.push(client_id); }
+    if (contact_id) { where += ' AND p.contactId = ?'; params.push(contact_id); }
+    const [rows] = await pool.query(
+      `SELECT p.* FROM personnes_contact p WHERE ${where} ORDER BY p.principal DESC, p.nom ASC`,
+      params
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
+});
+
 // GET /stats — KPIs pipeline
 router.get('/stats', verifyToken, async (req, res) => {
   try {

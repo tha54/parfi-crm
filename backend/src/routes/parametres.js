@@ -53,4 +53,42 @@ router.get('/clauses', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
 });
 
+// GET /grille-tarifaire
+router.get('/grille-tarifaire', verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM grille_tarifaire WHERE actif = 1 ORDER BY categorie, libelle');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+// PUT /grille-tarifaire/:id
+router.put('/grille-tarifaire/:id', verifyToken, requireRole('expert'), async (req, res) => {
+  const { libelle, taux_horaire } = req.body;
+  try {
+    await pool.query('UPDATE grille_tarifaire SET libelle = ?, taux_horaire = ? WHERE id = ?',
+      [libelle, taux_horaire, req.params.id]);
+    res.json({ message: 'Taux mis à jour' });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+// POST /grille-tarifaire
+router.post('/grille-tarifaire', verifyToken, requireRole('expert'), async (req, res) => {
+  const { categorie, libelle, taux_horaire } = req.body;
+  try {
+    const [r] = await pool.query(
+      'INSERT INTO grille_tarifaire (categorie, libelle, taux_horaire) VALUES (?, ?, ?)',
+      [categorie, libelle, taux_horaire]
+    );
+    res.status(201).json({ id: r.insertId });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+// DELETE /grille-tarifaire/:id
+router.delete('/grille-tarifaire/:id', verifyToken, requireRole('expert'), async (req, res) => {
+  try {
+    await pool.query('UPDATE grille_tarifaire SET actif = 0 WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Supprimé' });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
 module.exports = router;

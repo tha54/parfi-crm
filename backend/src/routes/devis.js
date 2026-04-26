@@ -15,10 +15,16 @@ async function nextNumero(prefix) {
 
 router.get('/', verifyToken, async (req, res) => {
   try {
+    const { client_id } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (client_id) { where += ' AND d.client_id = ?'; params.push(client_id); }
     const [rows] = await pool.query(
       `SELECT d.*, c.nom AS client_nom
        FROM devis d LEFT JOIN clients c ON d.client_id = c.id
-       ORDER BY d.createdAt DESC`
+       WHERE ${where}
+       ORDER BY d.createdAt DESC`,
+      params
     );
     res.json(rows);
   } catch { res.status(500).json({ message: 'Erreur serveur' }); }

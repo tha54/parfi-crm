@@ -16,10 +16,16 @@ async function nextNumero() {
 
 router.get('/', verifyToken, async (req, res) => {
   try {
+    const { client_id } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (client_id) { where += ' AND l.client_id = ?'; params.push(client_id); }
     const [rows] = await pool.query(
       `SELECT l.*, c.nom AS client_nom
        FROM lettres_mission l LEFT JOIN clients c ON l.client_id = c.id
-       ORDER BY l.createdAt DESC`
+       WHERE ${where}
+       ORDER BY l.createdAt DESC`,
+      params
     );
     res.json(rows);
   } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
@@ -83,16 +89,52 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     values.push(req.params.id);
     await pool.query(`UPDATE lettres_mission SET ${fields.join(', ')} WHERE id = ?`, values);
 
-    // PHASE 2B : auto-générer les factures si passage à 'signee'
+    // Auto-workflow quand passage à 'signee'
     let factureIds = [];
+    let missionIds = [];
     if (statut === 'signee' && prev?.statut !== 'signee') {
       factureIds = await genererFacturesDepuisLDM(req.params.id).catch(e => {
         console.error('Auto-billing error:', e.message);
         return [];
       });
+
+      try {
+        const [[ldm]] = await pool.query('SELECT * FROM lettres_mission WHERE id = ?', [req.params.id]);
+        if (ldm) {
+          const missionCategorie = {
+            tenue_comptable: 'tenue_comptable', revision: 'revision',
+            etablissement_comptes: 'etablissement_comptes', fiscal: 'fiscal',
+            social_paie: 'social', conseil: 'conseil', juridique: 'juridique', autre: 'autre'
+          }[ldm.typeMission] || 'autre';
+
+          const [mr] = await pool.query(
+            `INSERT INTO missions (contactId, client_id, nom, categorie, statut, honorairesBudgetes, tempsBudgeteH, dateDebut, dateFin, notes)
+             VALUES (?, ?, ?, ?, 'en_cours', ?, 0, ?, ?, ?)`,
+            [ldm.contactId || 0, ldm.client_id,
+             `${ldm.typeMission} — LM ${ldm.numero}`,
+             missionCategorie, ldm.montantHonorairesHT || 0,
+             ldm.dateDebut || null, ldm.dateFin || null, ldm.objetMission || null]
+          );
+          missionIds.push(mr.insertId);
+          await pool.query('UPDATE lettres_mission SET missionId = ? WHERE id = ?', [mr.insertId, req.params.id]);
+
+          if (ldm.client_id) {
+            const [[expert]] = await pool.query(`SELECT id FROM utilisateurs WHERE role = 'expert' LIMIT 1`);
+            if (expert) {
+              await pool.query(
+                `INSERT INTO taches (client_id, utilisateur_id, description, duree, date_echeance, statut, priorite, mission_id, origine)
+                 VALUES (?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY), 'a_faire', 'normale', ?, 'ldm')`,
+                [ldm.client_id, expert.id, `Démarrage mission : ${ldm.typeMission}`, mr.insertId]
+              );
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Auto-mission error:', e.message);
+      }
     }
 
-    res.json({ message: 'Lettre mise à jour', factureIds });
+    res.json({ message: 'Lettre mise à jour', factureIds, missionIds });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
 

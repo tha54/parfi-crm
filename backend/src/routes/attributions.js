@@ -3,7 +3,28 @@ const router = express.Router();
 const pool = require('../config/db');
 const { verifyToken, requireRole } = require('../middleware/auth');
 
-// Get attributions for a client
+// GET / — liste des attributions avec filtre optionnel ?client_id= ou ?utilisateur_id=
+router.get('/', verifyToken, async (req, res) => {
+  try {
+    const { client_id, utilisateur_id } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (client_id) { where += ' AND a.client_id = ?'; params.push(client_id); }
+    if (utilisateur_id) { where += ' AND a.utilisateur_id = ?'; params.push(utilisateur_id); }
+    const [rows] = await pool.query(
+      `SELECT a.*, u.nom, u.prenom, u.email, u.role
+       FROM attributions a JOIN utilisateurs u ON a.utilisateur_id = u.id
+       WHERE ${where}
+       ORDER BY a.role_sur_dossier DESC`,
+      params
+    );
+    res.json(rows);
+  } catch {
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+});
+
+// Get attributions for a client (legacy path)
 router.get('/client/:clientId', verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.query(

@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Collaborateurs from './pages/Collaborateurs';
 import Clients from './pages/Clients';
 import Attributions from './pages/Attributions';
+import ClientCockpit from './pages/ClientCockpit';
 import Taches from './pages/Taches';
 import Devis from './pages/Devis';
 import Factures from './pages/Factures';
@@ -14,6 +15,7 @@ import Prospects from './pages/Prospects';
 import Dimensionnement from './pages/Dimensionnement';
 import Pipeline from './pages/Pipeline';
 import Missions from './pages/Missions';
+import Travaux from './pages/Travaux';
 import Relances from './pages/Relances';
 import Rentabilite from './pages/Rentabilite';
 import ChargeTravail from './pages/ChargeTravail';
@@ -58,9 +60,12 @@ function AppRoutes() {
       <Route path="/briefing" element={<ProtectedRoute><AppLayout><MorningBriefing /></AppLayout></ProtectedRoute>} />
       <Route path="/mon-espace" element={<ProtectedRoute><AppLayout><MonEspace /></AppLayout></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><AppLayout><Clients /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id" element={<ProtectedRoute><AppLayout><ClientCockpit /></AppLayout></ProtectedRoute>} />
       <Route path="/attributions" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
+      <Route path="/portefeuille" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
       <Route path="/taches" element={<ProtectedRoute><AppLayout><Taches /></AppLayout></ProtectedRoute>} />
       <Route path="/missions" element={<ProtectedRoute><AppLayout><Missions /></AppLayout></ProtectedRoute>} />
+      <Route path="/travaux" element={<ProtectedRoute><AppLayout><Travaux /></AppLayout></ProtectedRoute>} />
       <Route path="/planning" element={<ProtectedRoute><AppLayout><Planning /></AppLayout></ProtectedRoute>} />
       <Route path="/hub-communication" element={<ProtectedRoute><AppLayout><HubCommunication /></AppLayout></ProtectedRoute>} />
       <Route path="/documents" element={<ProtectedRoute><AppLayout><GED /></AppLayout></ProtectedRoute>} />

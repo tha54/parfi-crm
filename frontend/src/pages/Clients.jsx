@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -224,6 +225,7 @@ function AttributionsPanel({ client, users, onClose }) {
 
 export default function Clients() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [clients, setClients] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -304,7 +306,7 @@ export default function Clients() {
                 <tbody>
                   {filtered.map(c => (
                     <tr key={c.id}>
-                      <td><strong>{c.nom}</strong></td>
+                      <td><strong style={{ cursor: 'pointer', color: 'var(--primary)' }} onClick={() => navigate(`/clients/${c.id}`)}>{c.nom}</strong></td>
                       <td><code style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.siren || '—'}</code></td>
                       <td><span className={`badge badge-${typeBadge(c.type)}`}>{c.type}</span></td>
                       <td><span className={`badge badge-${c.regime === 'trimestriel' ? 'trim' : c.regime}`}>{regimeLabel[c.regime]}</span></td>
