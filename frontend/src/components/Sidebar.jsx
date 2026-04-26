@@ -8,7 +8,6 @@ export default function Sidebar() {
   const navigate = useNavigate();
 
   const handleLogout = () => { logout(); navigate('/login'); };
-
   const isExpert = user?.role === 'expert';
   const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
 
@@ -28,12 +27,14 @@ export default function Sidebar() {
       <nav className="sidebar-nav">
         <div className="nav-section">
           <div className="nav-section-label">Navigation</div>
+          <Link to="/briefing" icon="☀️" label="Briefing du jour" />
           <Link to="/dashboard" icon="🏠" label="Tableau de bord" />
           <Link to="/mon-espace" icon="👤" label="Mon Espace" />
           <Link to="/clients" icon="👥" label="Clients" />
           <Link to="/missions" icon="🎯" label="Missions" />
           <Link to="/planning" icon="📆" label="Planning" />
           <Link to="/hub-communication" icon="💬" label="Hub Communication" />
+          <Link to="/documents" icon="📁" label="Documents (GED)" />
           {isExpertOrChef && <Link to="/attributions" icon="🔗" label="Attributions" />}
         </div>
 
@@ -68,6 +69,9 @@ export default function Sidebar() {
           <div className="nav-section-label">Administration</div>
           {isExpert && <Link to="/collaborateurs" icon="🏢" label="Collaborateurs" />}
           {isExpert && <Link to="/parametres" icon="⚙️" label="Paramètres" />}
+          <a href="/portail" target="_blank" rel="noreferrer" className="nav-link" style={{ fontSize: 12, opacity: 0.75 }}>
+            <span className="icon">🌐</span> Portail client
+          </a>
         </div>
       </nav>
 

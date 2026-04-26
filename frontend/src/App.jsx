@@ -21,6 +21,10 @@ import MonEspace from './pages/MonEspace';
 import HubCommunication from './pages/HubCommunication';
 import Planning from './pages/Planning';
 import Parametres from './pages/Parametres';
+import MorningBriefing from './pages/MorningBriefing';
+import GED from './pages/GED';
+import PortalLogin from './pages/PortalLogin';
+import PortalDashboard from './pages/PortalDashboard';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -44,7 +48,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+
+      {/* Portail client (routes séparées, sans sidebar) */}
+      <Route path="/portail" element={<PortalLogin />} />
+      <Route path="/portail/dashboard" element={<PortalDashboard />} />
+
+      {/* CRM principal */}
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
+      <Route path="/briefing" element={<ProtectedRoute><AppLayout><MorningBriefing /></AppLayout></ProtectedRoute>} />
       <Route path="/mon-espace" element={<ProtectedRoute><AppLayout><MonEspace /></AppLayout></ProtectedRoute>} />
       <Route path="/clients" element={<ProtectedRoute><AppLayout><Clients /></AppLayout></ProtectedRoute>} />
       <Route path="/attributions" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
@@ -52,6 +63,7 @@ function AppRoutes() {
       <Route path="/missions" element={<ProtectedRoute><AppLayout><Missions /></AppLayout></ProtectedRoute>} />
       <Route path="/planning" element={<ProtectedRoute><AppLayout><Planning /></AppLayout></ProtectedRoute>} />
       <Route path="/hub-communication" element={<ProtectedRoute><AppLayout><HubCommunication /></AppLayout></ProtectedRoute>} />
+      <Route path="/documents" element={<ProtectedRoute><AppLayout><GED /></AppLayout></ProtectedRoute>} />
       <Route path="/collaborateurs" element={<ProtectedRoute roles={['expert']}><AppLayout><Collaborateurs /></AppLayout></ProtectedRoute>} />
       <Route path="/devis" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Devis /></AppLayout></ProtectedRoute>} />
       <Route path="/factures" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Factures /></AppLayout></ProtectedRoute>} />

@@ -207,6 +207,10 @@ export default function Factures() {
                                   value={f.statut} onChange={e => changeStatut(f, e.target.value)}>
                                   {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                                 </select>
+                                  <button className="btn btn-ghost btn-sm" title="Télécharger PDF Factur-X"
+                                  onClick={() => window.open(`/api/factures/${f.id}/pdf`, '_blank')}>📄 PDF</button>
+                                <button className="btn btn-ghost btn-sm" title="Télécharger XML Factur-X"
+                                  onClick={() => window.open(`/api/factures/${f.id}/facturx-xml`, '_blank')}>🔖 XML</button>
                                 <button className="btn btn-ghost btn-sm" onClick={() => openEdit(f)}>✏️</button>
                                 {user?.role === 'expert' && <button className="btn btn-danger btn-sm" onClick={() => del(f)}>🗑</button>}
                               </div>

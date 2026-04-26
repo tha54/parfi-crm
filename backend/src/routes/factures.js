@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { generateFacturXML, generateFacturePDF } = require('../utils/facturx');
 
 async function nextNumero() {
   const year = new Date().getFullYear();
@@ -10,30 +11,81 @@ async function nextNumero() {
     [`FAC-${year}-%`]
   );
   const seq = rows.length ? parseInt(rows[0].numero.split('-').pop(), 10) + 1 : 1;
-  return `FAC-${year}-${String(seq).padStart(3, '0')}`;
+  return `FAC-${year}-${String(seq).padStart(4, '0')}`;
+}
+
+async function getCabinet() {
+  const [[cab]] = await pool.query('SELECT * FROM parametres_cabinet LIMIT 1').catch(() => [[null]]);
+  return cab || {};
 }
 
 router.get('/', verifyToken, async (req, res) => {
   try {
+    const { client_id, statut } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (client_id) { where += ' AND f.client_id = ?'; params.push(client_id); }
+    if (statut) { where += ' AND f.statut = ?'; params.push(statut); }
+
     const [rows] = await pool.query(
       `SELECT f.*, c.nom AS client_nom
        FROM factures f LEFT JOIN clients c ON f.client_id = c.id
-       ORDER BY f.createdAt DESC`
+       WHERE ${where}
+       ORDER BY f.createdAt DESC`,
+      params
     );
     res.json(rows);
-  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
 
 router.get('/:id', verifyToken, async (req, res) => {
   try {
     const [[f]] = await pool.query(
-      `SELECT f.*, c.nom AS client_nom FROM factures f LEFT JOIN clients c ON f.client_id = c.id WHERE f.id = ?`,
+      `SELECT f.*, c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse
+       FROM factures f LEFT JOIN clients c ON f.client_id = c.id WHERE f.id = ?`,
       [req.params.id]
     );
     if (!f) return res.status(404).json({ message: 'Facture introuvable' });
     const [lignes] = await pool.query('SELECT * FROM lignes_facture WHERE factureId = ? ORDER BY ordre', [f.id]);
     res.json({ ...f, lignes });
-  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+// GET /:id/facturx — télécharger le XML Factur-X
+router.get('/:id/facturx-xml', verifyToken, async (req, res) => {
+  try {
+    const [[f]] = await pool.query(
+      `SELECT f.*, c.nom AS client_nom, c.siren AS client_siren
+       FROM factures f LEFT JOIN clients c ON f.client_id = c.id WHERE f.id = ?`,
+      [req.params.id]
+    );
+    if (!f) return res.status(404).json({ message: 'Facture introuvable' });
+    const [lignes] = await pool.query('SELECT * FROM lignes_facture WHERE factureId=? ORDER BY ordre', [f.id]);
+    const cabinet = await getCabinet();
+    const xml = generateFacturXML(f, cabinet, lignes);
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Content-Disposition', `attachment; filename="facturx-${f.numero}.xml"`);
+    res.send(xml);
+  } catch (e) { res.status(500).json({ message: 'Erreur génération XML', e: e.message }); }
+});
+
+// GET /:id/pdf — télécharger le PDF Factur-X
+router.get('/:id/pdf', verifyToken, async (req, res) => {
+  try {
+    const [[f]] = await pool.query(
+      `SELECT f.*, c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse
+       FROM factures f LEFT JOIN clients c ON f.client_id = c.id WHERE f.id = ?`,
+      [req.params.id]
+    );
+    if (!f) return res.status(404).json({ message: 'Facture introuvable' });
+    const [lignes] = await pool.query('SELECT * FROM lignes_facture WHERE factureId=? ORDER BY ordre', [f.id]);
+    const cabinet = await getCabinet();
+    const xml = generateFacturXML(f, cabinet, lignes);
+    const pdfBuffer = await generateFacturePDF(f, cabinet, lignes, xml);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="facture-${f.numero}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (e) { res.status(500).json({ message: 'Erreur génération PDF', e: e.message }); }
 });
 
 router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
@@ -78,7 +130,7 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     values.push(req.params.id);
     await pool.query(`UPDATE factures SET ${fields.join(', ')} WHERE id = ?`, values);
     res.json({ message: 'Facture mise à jour' });
-  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
 });
 
 router.delete('/:id', verifyToken, requireRole('expert'), async (req, res) => {

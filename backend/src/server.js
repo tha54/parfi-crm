@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const utilisateursRoutes = require('./routes/utilisateurs');
@@ -24,11 +25,21 @@ const interactionsRoutes = require('./routes/interactions');
 const documentsRoutes = require('./routes/documents');
 const paiementsRoutes = require('./routes/paiements');
 const planningRoutes = require('./routes/planning');
+const gedRoutes = require('./routes/ged');
+const portalRoutes = require('./routes/portal');
+const briefingRoutes = require('./routes/briefing');
 
 const app = express();
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174'], credentials: true }));
-app.use(express.json());
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173'],
+  credentials: true,
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Static file serving for uploads preview
+app.use('/uploads', express.static('/opt/parfi-data/documents'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/utilisateurs', utilisateursRoutes);
@@ -53,8 +64,11 @@ app.use('/api/interactions', interactionsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/paiements', paiementsRoutes);
 app.use('/api/planning', planningRoutes);
+app.use('/api/ged', gedRoutes);
+app.use('/api/portal', portalRoutes);
+app.use('/api/briefing', briefingRoutes);
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.1' }));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Parfi CRM API démarré sur le port ${PORT}`));
