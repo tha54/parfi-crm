@@ -24,13 +24,50 @@ function Modal({ title, onClose, children }) {
   );
 }
 
+const TYPE_FROM_FORME = (forme) => {
+  const f = (forme || '').toLowerCase();
+  if (f.includes('sci') || f.includes('civile immobilière')) return 'SCI';
+  if (f.includes('association') || f.includes('fondation'))  return 'Association';
+  if (f.includes('anonyme'))                                  return 'SA';
+  if (f.includes('individuelle') || f.includes('libéral'))   return 'BNC';
+  if (f.includes('limitée') || f.includes('simplifiée') || f.includes('collective')) return 'BIC';
+  return null;
+};
+
 function ClientForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState({ nom: '', siren: '', type: 'BIC', regime: 'mensuel', ...initial });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sirenLoading, setSirenLoading] = useState(false);
+  const [sirenMsg, setSirenMsg] = useState(null);
   const isEdit = !!initial?.id;
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const lookupSiren = async () => {
+    const clean = form.siren.replace(/\s/g, '');
+    if (!/^\d{9}$/.test(clean)) {
+      setSirenMsg({ type: 'error', text: '9 chiffres requis pour la recherche Pappers' }); return;
+    }
+    setSirenLoading(true);
+    setSirenMsg(null);
+    try {
+      const { data } = await api.get(`/pappers/siren/${clean}`);
+      const suggested = TYPE_FROM_FORME(data.forme_juridique);
+      setForm(f => ({
+        ...f,
+        nom:  data.nom || f.nom,
+        siren: data.siren || f.siren,
+        type: suggested || f.type,
+      }));
+      setSirenMsg({ type: 'ok', text: `Données chargées : ${data.nom}${data.forme_juridique ? ` — ${data.forme_juridique}` : ''}` });
+    } catch (err) {
+      const isUnconfigured = err.response?.data?.unconfigured;
+      setSirenMsg({ type: 'error', text: isUnconfigured ? 'Pappers non configuré (PAPPERS_API_KEY manquant)' : (err.response?.data?.message || 'Introuvable sur Pappers') });
+    } finally {
+      setSirenLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -55,12 +92,35 @@ function ClientForm({ initial, onSave, onCancel }) {
     <form onSubmit={handleSubmit}>
       {error && <div className="alert alert-error">{error}</div>}
       <div className="form-group">
-        <label className="form-label">Nom du client *</label>
-        <input className="form-control" value={form.nom} onChange={set('nom')} required placeholder="SARL Exemple..." />
+        <label className="form-label">SIREN</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            className="form-control"
+            value={form.siren}
+            onChange={(e) => { set('siren')(e); setSirenMsg(null); }}
+            placeholder="123456789"
+            maxLength={14}
+            style={{ fontFamily: 'monospace', letterSpacing: '0.08em' }}
+          />
+          <button
+            type="button"
+            className="btn btn-accent btn-sm"
+            onClick={lookupSiren}
+            disabled={sirenLoading}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            {sirenLoading ? '…' : '🔍 Pappers'}
+          </button>
+        </div>
+        {sirenMsg && (
+          <div style={{ marginTop: 5, fontSize: 12, color: sirenMsg.type === 'error' ? 'var(--danger)' : 'var(--success)' }}>
+            {sirenMsg.text}
+          </div>
+        )}
       </div>
       <div className="form-group">
-        <label className="form-label">SIREN / SIRET</label>
-        <input className="form-control" value={form.siren} onChange={set('siren')} placeholder="123456789" maxLength={14} />
+        <label className="form-label">Nom du client *</label>
+        <input className="form-control" value={form.nom} onChange={set('nom')} required placeholder="SARL Exemple…" />
       </div>
       <div className="form-row">
         <div className="form-group">
@@ -78,7 +138,7 @@ function ClientForm({ initial, onSave, onCancel }) {
       </div>
       <div className="form-actions">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? 'Enregistrement...' : 'Enregistrer'}</button>
+        <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? 'Enregistrement…' : 'Enregistrer'}</button>
       </div>
     </form>
   );

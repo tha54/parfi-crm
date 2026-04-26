@@ -125,18 +125,18 @@ export default function Factures() {
       <div className="page-body">
         {/* KPI résumé */}
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
-          <div className="kpi-card" style={{ borderTop: '3px solid #38a169' }}>
+          <div className="kpi-card" style={{ borderTop: '3px solid #00897b' }}>
             <span className="kpi-icon">💚</span>
-            <div><div className="kpi-value" style={{ color: '#38a169' }}>{fmt(caEncaisse)}</div><div className="kpi-label">CA encaissé</div></div>
+            <div><div className="kpi-value" style={{ color: '#00897b' }}>{fmt(caEncaisse)}</div><div className="kpi-label">CA encaissé</div></div>
           </div>
-          <div className="kpi-card" style={{ borderTop: '3px solid #3182ce' }}>
+          <div className="kpi-card" style={{ borderTop: '3px solid #00b4d8' }}>
             <span className="kpi-icon">⏳</span>
-            <div><div className="kpi-value" style={{ color: '#3182ce' }}>{fmt(caEnAttente)}</div><div className="kpi-label">En attente</div></div>
+            <div><div className="kpi-value" style={{ color: '#00b4d8' }}>{fmt(caEnAttente)}</div><div className="kpi-label">En attente</div></div>
           </div>
           {caRetard > 0 && (
-            <div className="kpi-card" style={{ borderTop: '3px solid #e53e3e' }}>
+            <div className="kpi-card" style={{ borderTop: '3px solid #d63031' }}>
               <span className="kpi-icon">⚠️</span>
-              <div><div className="kpi-value" style={{ color: '#e53e3e' }}>{fmt(caRetard)}</div><div className="kpi-label">En retard</div></div>
+              <div><div className="kpi-value" style={{ color: '#d63031' }}>{fmt(caRetard)}</div><div className="kpi-label">En retard</div></div>
             </div>
           )}
           <div className="kpi-card" style={{ borderTop: '3px solid var(--primary)' }}>
@@ -201,7 +201,7 @@ export default function Factures() {
                             <td>
                               <div className="td-actions">
                                 {f.statut !== 'payee' && f.statut !== 'annulee' && (
-                                  <button className="btn btn-ghost btn-sm" style={{ color: '#38a169', borderColor: '#38a169' }} onClick={() => marquerPayee(f)}>✓ Payée</button>
+                                  <button className="btn btn-ghost btn-sm" style={{ color: '#00897b', borderColor: '#00897b' }} onClick={() => marquerPayee(f)}>✓ Payée</button>
                                 )}
                                 <select className="form-control" style={{ width: 120, fontSize: 12, padding: '4px 8px' }}
                                   value={f.statut} onChange={e => changeStatut(f, e.target.value)}>

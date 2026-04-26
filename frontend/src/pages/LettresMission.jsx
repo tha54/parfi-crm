@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -26,6 +27,7 @@ function fmt(v) {
 
 export default function LettresMission() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [lettres, setLettres] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -106,6 +108,11 @@ export default function LettresMission() {
       <div className="page-header">
         <h1>Lettres de mission</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {canEdit && (
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/dimensionnement')} title="Calculer les honoraires et créer une LDM depuis le dimensionnement">
+              📐 Dimensionner
+            </button>
+          )}
           {canEdit && <button className="btn btn-primary" onClick={openCreate}>+ Nouvelle lettre</button>}
         </div>
       </div>
@@ -115,7 +122,7 @@ export default function LettresMission() {
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
           {Object.entries(STATUTS).map(([k, v]) => {
             const count = lettres.filter(l => l.statut === k).length;
-            const color = k === 'signee' ? '#38a169' : k === 'envoyee' ? '#3182ce' : k === 'archivee' ? '#718096' : '#c9a84c';
+            const color = k === 'signee' ? '#00897b' : k === 'envoyee' ? '#00b4d8' : k === 'archivee' ? '#6b7c93' : '#e67e22';
             return (
               <div key={k} className="kpi-card" style={{ cursor: 'pointer', borderTop: `3px solid ${color}` }}
                 onClick={() => setFilterStatut(filterStatut === k ? '' : k)}>
@@ -123,9 +130,9 @@ export default function LettresMission() {
               </div>
             );
           })}
-          <div className="kpi-card" style={{ borderTop: '3px solid #38a169' }}>
+          <div className="kpi-card" style={{ borderTop: '3px solid #00897b' }}>
             <span className="kpi-icon">💼</span>
-            <div><div className="kpi-value" style={{ color: '#38a169', fontSize: 20 }}>{fmt(totalHonoraires)}</div><div className="kpi-label">Honoraires signés</div></div>
+            <div><div className="kpi-value" style={{ color: '#00897b', fontSize: 20 }}>{fmt(totalHonoraires)}</div><div className="kpi-label">Honoraires signés</div></div>
           </div>
         </div>
 
@@ -206,7 +213,17 @@ export default function LettresMission() {
           <div className="modal">
             <div className="modal-header">
               <span className="modal-title">{modal === 'create' ? 'Nouvelle lettre de mission' : `Modifier ${modal.numero}`}</span>
-              <button className="modal-close" onClick={() => setModal(null)}>×</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: 12 }}
+                  onClick={() => navigate(`/dimensionnement?returnTo=ldm${form.client_id ? `&clientId=${form.client_id}` : ''}`)}
+                  title="Calculer les honoraires depuis le dimensionnement"
+                >
+                  📐 Calculer avec le dimensionnement
+                </button>
+                <button className="modal-close" onClick={() => setModal(null)}>×</button>
+              </div>
             </div>
             <div className="modal-body">
               {err && <div className="alert alert-error">{err}</div>}

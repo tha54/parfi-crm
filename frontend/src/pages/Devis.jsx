@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -28,6 +29,7 @@ function calcTotaux(lignes, tauxTVA) {
 
 export default function Devis() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [devis, setDevis] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -124,6 +126,11 @@ export default function Devis() {
         <h1>Devis</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className="text-muted text-sm">{filtered.length} devis · {fmt(totalTTC)} TTC</span>
+          {canEdit && (
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/dimensionnement')} title="Calculer les honoraires et créer un devis depuis le dimensionnement">
+              📐 Dimensionner
+            </button>
+          )}
           {canEdit && <button className="btn btn-primary" onClick={openCreate}>+ Nouveau devis</button>}
         </div>
       </div>
@@ -146,7 +153,7 @@ export default function Devis() {
           {Object.entries(STATUTS).map(([k, v]) => {
             const count = devis.filter(d => d.statut === k).length;
             return (
-              <div key={k} className="kpi-card" style={{ cursor: 'pointer', borderTop: `3px solid ${k === 'accepte' ? '#38a169' : k === 'envoye' ? '#3182ce' : k === 'refuse' ? '#e53e3e' : '#718096'}` }}
+              <div key={k} className="kpi-card" style={{ cursor: 'pointer', borderTop: `3px solid ${k === 'accepte' ? '#00897b' : k === 'envoye' ? '#00b4d8' : k === 'refuse' ? '#d63031' : '#6b7c93'}` }}
                 onClick={() => setFilterStatut(filterStatut === k ? '' : k)}>
                 <div>
                   <div className="kpi-value" style={{ fontSize: 22 }}>{count}</div>
@@ -226,7 +233,17 @@ export default function Devis() {
           <div className="modal" style={{ maxWidth: 700 }}>
             <div className="modal-header">
               <span className="modal-title">{modal === 'create' ? 'Nouveau devis' : `Modifier ${modal.numero}`}</span>
-              <button className="modal-close" onClick={() => setModal(null)}>×</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: 12 }}
+                  onClick={() => navigate(`/dimensionnement?returnTo=devis${form.client_id ? `&clientId=${form.client_id}` : ''}`)}
+                  title="Calculer les honoraires depuis le dimensionnement"
+                >
+                  📐 Calculer avec le dimensionnement
+                </button>
+                <button className="modal-close" onClick={() => setModal(null)}>×</button>
+              </div>
             </div>
             <div className="modal-body">
               {err && <div className="alert alert-error">{err}</div>}

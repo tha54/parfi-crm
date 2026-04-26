@@ -12,55 +12,63 @@ export default function Sidebar() {
   const isExpert = user?.role === 'expert';
   const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
 
+  const Link = ({ to, icon, label }) => (
+    <NavLink to={to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+      <span className="icon">{icon}</span> {label}
+    </NavLink>
+  );
+
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="logo-title">📊 Parfi CRM</div>
-        <div className="logo-sub">Cabinet Parfi France</div>
+        <img src="/parfi-logo-dark.svg" alt="ParFi Group" />
+        <div className="logo-sub">Espace de gestion</div>
       </div>
 
       <nav className="sidebar-nav">
         <div className="nav-section">
           <div className="nav-section-label">Navigation</div>
-          <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <span className="icon">🏠</span> Tableau de bord
-          </NavLink>
-          <NavLink to="/clients" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <span className="icon">👥</span> Clients
-          </NavLink>
-          {isExpertOrChef && (
-            <NavLink to="/attributions" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon">🔗</span> Attributions
-            </NavLink>
-          )}
-          <NavLink to="/taches" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <span className="icon">✅</span> Tâches
-          </NavLink>
+          <Link to="/dashboard" icon="🏠" label="Tableau de bord" />
+          <Link to="/mon-espace" icon="👤" label="Mon Espace" />
+          <Link to="/clients" icon="👥" label="Clients" />
+          <Link to="/missions" icon="🎯" label="Missions" />
+          <Link to="/planning" icon="📆" label="Planning" />
+          <Link to="/hub-communication" icon="💬" label="Hub Communication" />
+          {isExpertOrChef && <Link to="/attributions" icon="🔗" label="Attributions" />}
         </div>
 
         {isExpertOrChef && (
           <div className="nav-section">
             <div className="nav-section-label">Commercial</div>
-            <NavLink to="/devis" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon">📄</span> Devis
-            </NavLink>
-            <NavLink to="/factures" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon">🧾</span> Factures
-            </NavLink>
-            <NavLink to="/lettres-mission" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon">📋</span> Lettres de mission
-            </NavLink>
+            <Link to="/prospects" icon="📡" label="Prospects" />
+            <Link to="/pipeline" icon="📊" label="Pipeline" />
+            <Link to="/devis" icon="📄" label="Devis" />
+            <Link to="/lettres-mission" icon="📋" label="Lettres de mission" />
+            <Link to="/dimensionnement" icon="📐" label="Dimensionnement" />
           </div>
         )}
 
-        {isExpert && (
+        {isExpertOrChef && (
           <div className="nav-section">
-            <div className="nav-section-label">Administration</div>
-            <NavLink to="/collaborateurs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon">👤</span> Collaborateurs
-            </NavLink>
+            <div className="nav-section-label">Facturation</div>
+            <Link to="/factures" icon="🧾" label="Factures" />
+            <Link to="/relances" icon="🔔" label="Relances" />
           </div>
         )}
+
+        {isExpertOrChef && (
+          <div className="nav-section">
+            <div className="nav-section-label">Performance</div>
+            <Link to="/rentabilite" icon="📈" label="Rentabilité" />
+            <Link to="/charge-travail" icon="⚖️" label="Charge de travail" />
+          </div>
+        )}
+
+        <div className="nav-section">
+          <div className="nav-section-label">Administration</div>
+          {isExpert && <Link to="/collaborateurs" icon="🏢" label="Collaborateurs" />}
+          {isExpert && <Link to="/parametres" icon="⚙️" label="Paramètres" />}
+        </div>
       </nav>
 
       <div className="sidebar-footer">
@@ -69,7 +77,11 @@ export default function Sidebar() {
           {user?.email}
           <div className="user-role-badge">{roleLabel[user?.role]}</div>
         </div>
-        <button className="btn btn-ghost btn-sm" style={{ width: '100%', color: 'rgba(255,255,255,0.7)', borderColor: 'rgba(255,255,255,0.2)' }} onClick={handleLogout}>
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ width: '100%', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', borderColor: 'rgba(255,255,255,0.15)' }}
+          onClick={handleLogout}
+        >
           🚪 Déconnexion
         </button>
       </div>

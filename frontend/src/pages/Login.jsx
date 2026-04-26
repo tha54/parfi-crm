@@ -20,7 +20,7 @@ export default function Login() {
       login(res.data.token, res.data.user);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.message || 'Erreur de connexion');
+      setError(err.response?.data?.message || 'Identifiants incorrects');
     } finally {
       setLoading(false);
     }
@@ -30,9 +30,8 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">
-          <div className="logo-icon">📊</div>
-          <h1>Parfi CRM</h1>
-          <p>Cabinet Parfi France — Espace de gestion</p>
+          <img src="/parfi-logo.svg" alt="ParFi Group" />
+          <p>Votre espace de gestion</p>
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}
@@ -61,8 +60,13 @@ export default function Login() {
               required
             />
           </div>
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '11px' }} disabled={loading}>
-            {loading ? 'Connexion...' : 'Se connecter'}
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: '100%', justifyContent: 'center', padding: '11px', fontSize: '14px', fontWeight: '600' }}
+            disabled={loading}
+          >
+            {loading ? 'Connexion…' : 'Se connecter'}
           </button>
         </form>
       </div>

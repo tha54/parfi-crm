@@ -36,14 +36,17 @@ router.get('/:id', verifyToken, async (req, res) => {
 });
 
 router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
-  const { client_id, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin } = req.body;
+  const { client_id, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin, repartitionTaches, notesInternes } = req.body;
   if (!client_id || !typeMission) return res.status(400).json({ message: 'Client et type de mission requis' });
   try {
     const numero = await nextNumero();
+    const repartition = repartitionTaches
+      ? (typeof repartitionTaches === 'string' ? repartitionTaches : JSON.stringify(repartitionTaches))
+      : null;
     const [result] = await pool.query(
-      `INSERT INTO lettres_mission (numero, client_id, contactId, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin)
-       VALUES (?, ?, 0, ?, ?, ?, ?, ?)`,
-      [numero, client_id, typeMission, objetMission || null, montantHonorairesHT || 0, dateDebut || null, dateFin || null]
+      `INSERT INTO lettres_mission (numero, client_id, contactId, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin, repartitionTaches, notesInternes)
+       VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+      [numero, client_id, typeMission, objetMission || null, montantHonorairesHT || 0, dateDebut || null, dateFin || null, repartition, notesInternes || null]
     );
     res.status(201).json({ id: result.insertId, numero });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
