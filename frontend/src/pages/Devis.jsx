@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import AuditLog from '../components/AuditLog';
 
 const STATUTS = { brouillon: 'Brouillon', envoye: 'Envoyé', accepte: 'Accepté', refuse: 'Refusé', expire: 'Expiré' };
 const STATUT_COLORS = { brouillon: 'autre', envoye: 'en_cours', accepte: 'termine', refuse: 'reporte', expire: 'inactif' };
@@ -25,6 +26,34 @@ function calcTotaux(lignes, tauxTVA) {
   const totalHT = lignes.reduce((s, l) => s + parseFloat(l.totalHT || 0), 0);
   const totalTVA = totalHT * (parseFloat(tauxTVA) / 100);
   return { totalHT: Math.round(totalHT * 100) / 100, totalTVA: Math.round(totalTVA * 100) / 100, totalTTC: Math.round((totalHT + totalTVA) * 100) / 100 };
+}
+
+function DevisAuditSection({ devisId }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', padding: '10px 14px', background: 'var(--bg)',
+          border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+          color: 'var(--primary)',
+        }}
+      >
+        <span>📋 Historique</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+          {open ? '▲ Masquer' : '▼ Afficher'}
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border)' }}>
+          <AuditLog entityType="devis" entityId={devisId} compact />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Devis() {
@@ -379,6 +408,11 @@ export default function Devis() {
                   <textarea className="form-control" rows={3} value={form.notesInternes} onChange={e => setForm(f => ({ ...f, notesInternes: e.target.value }))} />
                 </div>
               </div>
+
+              {/* Audit log — only for existing devis */}
+              {modal !== 'create' && modal?.id && (
+                <DevisAuditSection devisId={modal.id} />
+              )}
 
               <div className="form-actions">
                 <button className="btn btn-ghost" onClick={() => setModal(null)}>Annuler</button>

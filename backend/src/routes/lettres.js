@@ -89,6 +89,29 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     values.push(req.params.id);
     await pool.query(`UPDATE lettres_mission SET ${fields.join(', ')} WHERE id = ?`, values);
 
+    // Notify all expert/chef users when LDM is signed
+    if (statut === 'signee' && prev?.statut !== 'signee') {
+      try {
+        const [[ldmForNotif]] = await pool.query(
+          `SELECT numero FROM lettres_mission WHERE id = ?`, [req.params.id]
+        );
+        if (ldmForNotif) {
+          const [experts] = await pool.query(
+            `SELECT id FROM utilisateurs WHERE role IN ('expert', 'chef_mission')`
+          );
+          for (const u of experts) {
+            await pool.query(
+              `INSERT INTO notifications (utilisateur_id, type, titre, message, lien, lue)
+               VALUES (?, 'ldm_signee', ?, 'Une lettre de mission vient d\'être signée.', '/lettres-mission', 0)`,
+              [u.id, `LDM signée : ${ldmForNotif.numero}`]
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Notification LDM signée error:', e.message);
+      }
+    }
+
     // Auto-workflow quand passage à 'signee'
     let factureIds = [];
     let missionIds = [];

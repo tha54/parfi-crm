@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import GED from './GED';
+import { marked } from 'marked';
+import AuditLog from '../components/AuditLog';
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 const fmt = (n) =>
@@ -64,6 +66,7 @@ const TABS = [
   { key: 'taches', label: 'Tâches' },
   { key: 'facturation', label: 'Facturation' },
   { key: 'documents', label: 'Documents' },
+  { key: 'notes', label: '📝 Notes' },
   { key: 'devis', label: 'Devis & LDM' },
   { key: 'contacts', label: 'Contacts' },
 ];
@@ -156,7 +159,7 @@ function TacheModal({ clientId, interactionObjet, users, currentUser, onSave, on
 }
 
 // ─── Tab: Vue d'ensemble ──────────────────────────────────────────────────────
-function TabOverview({ client, attributions, factures, taches, missions }) {
+function TabOverview({ client, attributions, factures, taches, missions, clientId }) {
   const caFacture = factures.filter((f) => f.statut !== 'brouillon' && f.statut !== 'annulee')
     .reduce((s, f) => s + parseFloat(f.totalHT || 0), 0);
   const impayes = factures.filter((f) => f.statut === 'retard' || f.statut === 'envoyee')
@@ -298,6 +301,16 @@ function TabOverview({ client, attributions, factures, taches, missions }) {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Audit history */}
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="card-header">
+          <span className="card-title">Historique des modifications</span>
+        </div>
+        <div className="card-body">
+          <AuditLog entityType="client" entityId={clientId} />
         </div>
       </div>
     </div>
@@ -733,6 +746,141 @@ function TabDevisLdm({ devis, ldm }) {
   );
 }
 
+// ─── Tab: Notes riches ───────────────────────────────────────────────────────
+function TabNotes({ client, clientId, currentUser, onSaved }) {
+  const canEdit = ['expert', 'chef_mission'].includes(currentUser?.role);
+  const [editing, setEditing] = useState(false);
+  const [editedText, setEditedText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
+
+  const startEdit = () => {
+    setEditedText(client.notes_riches || '');
+    setEditing(true);
+    setErr('');
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setErr('');
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setErr('');
+    try {
+      await api.put(`/clients/${clientId}`, { notes_riches: editedText });
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasContent = client.notes_riches && client.notes_riches.trim().length > 0;
+
+  return (
+    <div className="card">
+      <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span className="card-title">📝 Notes du client</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!editing && (
+            <div style={{ position: 'relative' }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowHelp(v => !v)}
+                title="Aide Markdown"
+              >
+                ? Markdown
+              </button>
+              {showHelp && (
+                <div style={{
+                  position: 'absolute', top: 32, right: 0, zIndex: 50,
+                  background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,.12)', padding: 16, minWidth: 220, fontSize: 12,
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8, color: '#0f1f4b' }}>Aide Markdown</div>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <tbody>
+                      {[
+                        ['**gras**', 'Texte en gras'],
+                        ['*italique*', 'Texte en italique'],
+                        ['# Titre', 'Titre de niveau 1'],
+                        ['## Sous-titre', 'Titre de niveau 2'],
+                        ['- Liste', 'Élément de liste'],
+                        ['| Col | Col |', 'Tableau'],
+                      ].map(([syn, desc]) => (
+                        <tr key={syn}>
+                          <td style={{ padding: '3px 8px 3px 0', fontFamily: 'monospace', color: '#0f1f4b', whiteSpace: 'nowrap' }}>{syn}</td>
+                          <td style={{ padding: '3px 0', color: 'var(--text-muted)' }}>{desc}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button
+                    style={{ marginTop: 8, fontSize: 11, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                    onClick={() => setShowHelp(false)}
+                  >
+                    Fermer
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {canEdit && !editing && (
+            <button className="btn btn-ghost btn-sm" onClick={startEdit}>✏️ Éditer</button>
+          )}
+        </div>
+      </div>
+      <div className="card-body">
+        {editing ? (
+          <div>
+            <textarea
+              value={editedText}
+              onChange={(e) => setEditedText(e.target.value)}
+              style={{
+                width: '100%', minHeight: 500, fontFamily: 'monospace', fontSize: 13,
+                border: '1px solid var(--border)', borderRadius: 6, padding: 12,
+                resize: 'vertical', outline: 'none', lineHeight: 1.6, boxSizing: 'border-box',
+              }}
+              placeholder="Rédigez vos notes en Markdown…"
+            />
+            {err && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{err}</p>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="btn btn-ghost btn-sm" onClick={cancelEdit} disabled={saving}>Annuler</button>
+              <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
+                {saving ? 'Enregistrement…' : '💾 Sauvegarder'}
+              </button>
+            </div>
+          </div>
+        ) : hasContent ? (
+          <div
+            dangerouslySetInnerHTML={{ __html: marked(client.notes_riches || '') }}
+            style={{
+              padding: '8px 4px', lineHeight: 1.8, fontSize: 14, color: 'var(--text)',
+              maxWidth: '100%', overflowWrap: 'break-word',
+            }}
+            className="notes-prose"
+          />
+        ) : (
+          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>📝</div>
+            <p style={{ marginBottom: 12 }}>Aucune note pour ce client.</p>
+            {canEdit && (
+              <button className="btn btn-primary btn-sm" onClick={startEdit}>
+                Cliquez Éditer pour commencer
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Contacts ────────────────────────────────────────────────────────────
 function TabContacts({ contacts }) {
   if (contacts.length === 0) {
@@ -975,6 +1123,7 @@ export default function ClientCockpit() {
             factures={factures}
             taches={taches}
             missions={missions}
+            clientId={clientId}
           />
         )}
 
@@ -1000,6 +1149,15 @@ export default function ClientCockpit() {
               <GED clientId={clientId} />
             </div>
           </div>
+        )}
+
+        {tab === 'notes' && (
+          <TabNotes
+            client={client}
+            clientId={clientId}
+            currentUser={user}
+            onSaved={() => api.get(`/clients/${clientId}`).then((r) => setClient(r.data))}
+          />
         )}
 
         {tab === 'devis' && <TabDevisLdm devis={devis} ldm={ldm} />}

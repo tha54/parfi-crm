@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import TaskCommentDrawer from '../components/TaskCommentDrawer';
 
 const STATUTS = ['a_faire', 'en_cours', 'termine', 'reporte'];
 const statutLabel = { a_faire: 'À faire', en_cours: 'En cours', termine: 'Terminé', reporte: 'Reporté' };
@@ -109,17 +110,30 @@ export default function Taches() {
   const [modal, setModal] = useState(null);
   const [filterStatut, setFilterStatut] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedTache, setSelectedTache] = useState(null);
+  const [commentCounts, setCommentCounts] = useState({});
+  const [taskDeps, setTaskDeps] = useState({});
 
   const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
 
   const load = () => {
     setLoading(true);
-    const calls = [api.get('/taches'), api.get('/clients')];
-    if (isExpertOrChef) calls.push(api.get('/utilisateurs'));
+    const calls = [api.get('/taches'), api.get('/clients'), api.get('/utilisateurs')];
     Promise.all(calls).then(([tr, cr, ur]) => {
-      setTaches(tr.data);
+      const tachesData = tr.data;
+      setTaches(tachesData);
       setClients(cr.data);
       if (ur) setUsers(ur.data.filter(u => u.actif));
+
+      // Fetch comment counts and dependencies for each task
+      tachesData.forEach(t => {
+        api.get(`/commentaires/tache/${t.id}`)
+          .then(r => setCommentCounts(prev => ({ ...prev, [t.id]: (r.data || []).length })))
+          .catch(() => {});
+        api.get(`/taches/${t.id}/dependances`)
+          .then(r => setTaskDeps(prev => ({ ...prev, [t.id]: r.data || [] })))
+          .catch(() => {});
+      });
     }).finally(() => setLoading(false));
   };
 
@@ -182,9 +196,17 @@ export default function Taches() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(t => (
+                  {filtered.map(t => {
+                    const deps = taskDeps[t.id] || [];
+                    const hasBlockingDep = deps.some(d => d.statut !== 'termine');
+                    const blockingNames = deps.filter(d => d.statut !== 'termine').map(d => d.description || d.titre).join(', ');
+                    const commentCount = commentCounts[t.id] || 0;
+                    return (
                     <tr key={t.id} style={isOverdue(t) ? { background: '#fff8f8' } : {}}>
                       <td>
+                        {hasBlockingDep && (
+                          <span title={`Bloquée par : ${blockingNames}`} style={{ marginRight: 5, cursor: 'help' }}>🔒</span>
+                        )}
                         {t.description}
                         {isOverdue(t) && <span style={{ marginLeft: '6px', color: 'var(--danger)', fontSize: '11px' }}>⚠ En retard</span>}
                       </td>
@@ -205,6 +227,13 @@ export default function Taches() {
                       </td>
                       <td>
                         <div className="td-actions">
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setSelectedTache(t)}
+                            title="Commentaires et détails"
+                          >
+                            💬{commentCount > 0 && <span style={{ marginLeft: 3, background: '#00B4D8', color: '#fff', borderRadius: 10, padding: '0 5px', fontSize: 10 }}>{commentCount}</span>}
+                          </button>
                           <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'edit', tache: t })}>Modifier</button>
                           {isExpertOrChef && (
                             <button className="btn btn-danger btn-sm" onClick={() => handleDelete(t)}>Supprimer</button>
@@ -212,7 +241,8 @@ export default function Taches() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -229,6 +259,14 @@ export default function Taches() {
         <Modal title="Modifier la tâche" onClose={() => setModal(null)}>
           <TacheForm initial={modal.tache} clients={clients} users={users} currentUser={user} onSave={() => { setModal(null); load(); }} onCancel={() => setModal(null)} />
         </Modal>
+      )}
+
+      {selectedTache && (
+        <TaskCommentDrawer
+          tache={selectedTache}
+          onClose={() => { setSelectedTache(null); load(); }}
+          utilisateurs={users}
+        />
       )}
     </>
   );

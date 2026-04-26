@@ -27,6 +27,10 @@ import MorningBriefing from './pages/MorningBriefing';
 import GED from './pages/GED';
 import PortalLogin from './pages/PortalLogin';
 import PortalDashboard from './pages/PortalDashboard';
+import Wiki from './pages/Wiki';
+import Automations from './pages/Automations';
+import TiimeImport from './pages/TiimeImport';
+import ClientIntake from './pages/ClientIntake';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -80,6 +84,10 @@ function AppRoutes() {
       <Route path="/rentabilite" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Rentabilite /></AppLayout></ProtectedRoute>} />
       <Route path="/charge-travail" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ChargeTravail /></AppLayout></ProtectedRoute>} />
       <Route path="/parametres" element={<ProtectedRoute roles={['expert']}><AppLayout><Parametres /></AppLayout></ProtectedRoute>} />
+      <Route path="/wiki" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Wiki /></AppLayout></ProtectedRoute>} />
+      <Route path="/automations" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Automations /></AppLayout></ProtectedRoute>} />
+      <Route path="/tiime-import" element={<ProtectedRoute roles={['expert']}><AppLayout><TiimeImport /></AppLayout></ProtectedRoute>} />
+      <Route path="/intake" element={<ClientIntake />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

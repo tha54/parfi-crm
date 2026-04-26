@@ -75,18 +75,29 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
 
 // Update client — expert & chef_mission
 router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
-  const { nom, siren, type, regime, actif } = req.body;
+  const { nom, siren, type, regime, actif, notes_riches } = req.body;
   try {
-    const fields = [];
-    const values = [];
-    if (nom !== undefined) { fields.push('nom = ?'); values.push(nom); }
-    if (siren !== undefined) { fields.push('siren = ?'); values.push(siren); }
-    if (type !== undefined) { fields.push('type = ?'); values.push(type); }
-    if (regime !== undefined) { fields.push('regime = ?'); values.push(regime); }
-    if (actif !== undefined) { fields.push('actif = ?'); values.push(actif); }
+    const [[prev]] = await pool.query('SELECT nom, siren, type, regime, actif FROM clients WHERE id = ?', [req.params.id]);
+    const fields = [], values = [], changed = [];
+    if (nom !== undefined) { fields.push('nom = ?'); values.push(nom); changed.push('nom'); }
+    if (siren !== undefined) { fields.push('siren = ?'); values.push(siren); changed.push('siren'); }
+    if (type !== undefined) { fields.push('type = ?'); values.push(type); changed.push('type'); }
+    if (regime !== undefined) { fields.push('regime = ?'); values.push(regime); changed.push('regime'); }
+    if (actif !== undefined) { fields.push('actif = ?'); values.push(actif); changed.push('actif'); }
+    if (notes_riches !== undefined) { fields.push('notes_riches = ?'); values.push(notes_riches); changed.push('notes_riches'); }
     if (fields.length === 0) return res.status(400).json({ message: 'Aucun champ à modifier' });
     values.push(req.params.id);
     await pool.query(`UPDATE clients SET ${fields.join(', ')} WHERE id = ?`, values);
+    // Audit log
+    const userName = `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || req.user.email;
+    pool.query(
+      `INSERT INTO audit_log (entity_type, entity_id, utilisateur_id, utilisateur_nom, action, champs_modifies, ancienne_valeur, nouvelle_valeur)
+       VALUES ('client', ?, ?, ?, 'update', ?, ?, ?)`,
+      [req.params.id, req.user.id, userName,
+       JSON.stringify(changed),
+       JSON.stringify(prev),
+       JSON.stringify(req.body)]
+    ).catch(() => {});
     res.json({ message: 'Client mis à jour' });
   } catch {
     res.status(500).json({ message: 'Erreur serveur' });

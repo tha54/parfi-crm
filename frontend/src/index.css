@@ -512,3 +512,95 @@ tr:hover td { background: #f6f9fc; }
 .gap-2 { gap: 8px; }
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
+
+/* ─── Markdown prose rendering ────────────────────────────── */
+.prose { line-height: 1.7; color: var(--text); }
+.prose h1 { font-size: 22px; font-weight: 800; color: #0f1f4b; margin: 24px 0 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; }
+.prose h2 { font-size: 18px; font-weight: 700; color: #0f1f4b; margin: 20px 0 8px; }
+.prose h3 { font-size: 15px; font-weight: 700; color: #0f1f4b; margin: 16px 0 6px; }
+.prose p { margin: 0 0 12px; }
+.prose ul, .prose ol { padding-left: 22px; margin: 0 0 12px; }
+.prose li { margin-bottom: 4px; }
+.prose code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px; color: #0f1f4b; }
+.prose pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+.prose pre code { background: none; padding: 0; color: inherit; }
+.prose blockquote { border-left: 4px solid #00b4d8; padding: 8px 16px; margin: 0 0 12px; background: #f0f9ff; color: #0f766e; border-radius: 0 6px 6px 0; }
+.prose table { border-collapse: collapse; width: 100%; margin: 0 0 12px; }
+.prose table th { background: #f5f7fb; padding: 8px 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7c93; border: 1px solid #e5e7eb; }
+.prose table td { padding: 8px 12px; border: 1px solid #e5e7eb; font-size: 13px; }
+.prose table tr:hover td { background: #f9fafb; }
+.prose a { color: #00b4d8; text-decoration: underline; }
+.prose strong { font-weight: 700; }
+.prose em { font-style: italic; }
+.prose hr { border: none; border-top: 2px solid #e5e7eb; margin: 20px 0; }
+
+/* ─── Notification bell ───────────────────────────────────── */
+.notif-bell { position: relative; }
+.notif-badge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; background: #ef4444; color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+.notif-dropdown { position: absolute; right: 0; top: 38px; width: 340px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.15); z-index: 300; overflow: hidden; }
+.notif-item { display: flex; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.1s; }
+.notif-item:hover { background: #f9fafb; }
+.notif-item.unread { background: #eff6ff; }
+.notif-item.unread:hover { background: #dbeafe; }
+
+/* ─── Task comment drawer ─────────────────────────────────── */
+.task-drawer { position: fixed; top: 0; right: 0; width: 420px; height: 100vh; background: #fff; box-shadow: -4px 0 24px rgba(0,0,0,.12); z-index: 300; display: flex; flex-direction: column; }
+.task-drawer-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; background: #0f1f4b; color: #fff; }
+.task-drawer-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+.comment-bubble { display: flex; gap: 10px; margin-bottom: 14px; }
+.comment-avatar { width: 32px; height: 32px; border-radius: 50%; background: #0f1f4b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.comment-content { background: #f5f7fb; border-radius: 0 10px 10px 10px; padding: 8px 12px; flex: 1; }
+.comment-meta { font-size: 11px; color: #6b7c93; margin-bottom: 2px; }
+.comment-text { font-size: 13px; }
+.mention-tag { color: #00b4d8; font-weight: 600; }
+
+/* ─── Wiki sidebar ────────────────────────────────────────── */
+.wiki-layout { display: flex; gap: 0; height: calc(100vh - 80px); }
+.wiki-sidebar { width: 220px; flex-shrink: 0; border-right: 1px solid #e5e7eb; overflow-y: auto; padding: 12px 0; background: #f9fafb; }
+.wiki-page-link { display: flex; align-items: center; gap: 8px; padding: 7px 16px; cursor: pointer; font-size: 13px; color: var(--text); border-radius: 0; transition: background 0.1s; }
+.wiki-page-link:hover { background: #f0f0f5; }
+.wiki-page-link.active { background: #0f1f4b; color: #fff; font-weight: 600; }
+.wiki-page-link.child { padding-left: 32px; font-size: 12px; }
+.wiki-content { flex: 1; overflow-y: auto; padding: 28px 36px; }
+
+/* ─── Automation cards ────────────────────────────────────── */
+.automation-card { background: #fff; border-radius: 10px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); border-left: 4px solid #9ca3af; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.automation-if-then { font-size: 13px; }
+.automation-trigger { display: inline-block; font-weight: 700; padding: 2px 8px; border-radius: 20px; font-size: 11px; }
+
+/* ─── Step indicator ──────────────────────────────────────── */
+.step-bar { display: flex; align-items: center; gap: 0; margin-bottom: 24px; }
+.step-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.step-circle { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0; }
+.step-circle.active { background: #0f1f4b; color: #fff; }
+.step-circle.done { background: #10b981; color: #fff; }
+.step-circle.pending { background: #e5e7eb; color: #6b7c93; }
+.step-line { flex: 1; height: 2px; background: #e5e7eb; margin: 0 8px; min-width: 40px; }
+.step-line.done { background: #10b981; }
+
+/* ─── Audit timeline ──────────────────────────────────────── */
+.audit-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 12px; }
+.audit-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.audit-dot.create { background: #10b981; }
+.audit-dot.update { background: #3b82f6; }
+.audit-dot.delete { background: #ef4444; }
+.audit-dot.statut_change { background: #f59e0b; }
+
+/* ─── Notes prose (markdown render) ──────────────────────── */
+.notes-prose h1, .notes-prose h2, .notes-prose h3 { color: #0f1f4b; margin: 1em 0 0.4em; }
+.notes-prose h1 { font-size: 1.5em; }
+.notes-prose h2 { font-size: 1.25em; }
+.notes-prose h3 { font-size: 1.1em; }
+.notes-prose p { margin: 0 0 0.75em; }
+.notes-prose ul, .notes-prose ol { padding-left: 1.5em; margin: 0 0 0.75em; }
+.notes-prose li { margin-bottom: 0.25em; }
+.notes-prose table { border-collapse: collapse; width: 100%; margin: 0.75em 0; font-size: 13px; }
+.notes-prose th, .notes-prose td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+.notes-prose th { background: var(--bg); font-weight: 700; color: #0f1f4b; }
+.notes-prose code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+.notes-prose pre { background: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; }
+.notes-prose pre code { background: none; padding: 0; }
+.notes-prose blockquote { border-left: 3px solid #00B4D8; padding-left: 12px; margin: 0.75em 0; color: var(--text-muted); font-style: italic; }
+.notes-prose a { color: #00B4D8; text-decoration: underline; }
+.notes-prose strong { font-weight: 700; color: #0f1f4b; }
+.notes-prose em { font-style: italic; }

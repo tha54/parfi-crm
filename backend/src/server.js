@@ -28,6 +28,13 @@ const planningRoutes = require('./routes/planning');
 const gedRoutes = require('./routes/ged');
 const portalRoutes = require('./routes/portal');
 const briefingRoutes = require('./routes/briefing');
+const notificationsRoutes = require('./routes/notifications');
+const commentairesRoutes = require('./routes/commentaires');
+const wikiRoutes = require('./routes/wiki');
+const auditRoutes = require('./routes/audit');
+const automationsRoutes = require('./routes/automations');
+const intakeRoutes = require('./routes/intake');
+const tiimeRoutes = require('./routes/tiime');
 
 const app = express();
 
@@ -67,6 +74,13 @@ app.use('/api/planning', planningRoutes);
 app.use('/api/ged', gedRoutes);
 app.use('/api/portal', portalRoutes);
 app.use('/api/briefing', briefingRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/commentaires', commentairesRoutes);
+app.use('/api/wiki', wikiRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/api/automations', automationsRoutes);
+app.use('/api/intake', intakeRoutes);
+app.use('/api/tiime', tiimeRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.1' }));
 
