@@ -38,10 +38,13 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
     capital, code_naf, activite, date_creation_ent,
     email, telephone,
     contact_nom, contact_prenom, contact_email, contact_telephone,
-    notes, statut, source,
+    notes, statut, source, type_prospect,
   } = req.body;
 
   if (!nom?.trim()) return res.status(400).json({ message: 'Le nom est requis' });
+  if (!email && !telephone && !contact_email && !contact_telephone) {
+    return res.status(400).json({ message: 'Au moins un email ou téléphone est requis' });
+  }
 
   try {
     const [result] = await pool.query(
@@ -50,8 +53,8 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
           capital, code_naf, activite, date_creation_ent,
           email, telephone,
           contact_nom, contact_prenom, contact_email, contact_telephone,
-          notes, statut, source, cree_par)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          notes, statut, source, type_prospect, cree_par)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         nom.trim(),
         siren  || null, siret  || null, forme_juridique || null,
@@ -61,6 +64,7 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
         contact_nom || null, contact_prenom || null,
         contact_email || null, contact_telephone || null,
         notes || null, statut || 'nouveau', source || null,
+        type_prospect || 'particulier',
         req.user.id,
       ]
     );
@@ -78,7 +82,7 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     'capital', 'code_naf', 'activite', 'date_creation_ent',
     'email', 'telephone',
     'contact_nom', 'contact_prenom', 'contact_email', 'contact_telephone',
-    'notes', 'statut', 'source',
+    'notes', 'statut', 'source', 'type_prospect',
   ];
 
   const updates = [];

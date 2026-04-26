@@ -14,6 +14,13 @@ const TYPES_CLIENT  = ['BIC', 'BNC', 'SCI', 'SA', 'Association', 'Autre'];
 const REGIMES_CLIENT = ['mensuel', 'trimestriel', 'annuel'];
 const regimeLabel    = { mensuel: 'Mensuel', trimestriel: 'Trimestriel', annuel: 'Annuel' };
 
+const TYPE_PROSPECT_LABEL = {
+  particulier: 'Particulier',
+  entreprise:  'Entreprise',
+  association: 'Association',
+  autre:       'Autre',
+};
+
 function suggestClientType(forme) {
   const f = (forme || '').toLowerCase();
   if (f.includes('sci') || f.includes('civile immobilière')) return 'SCI';
@@ -22,6 +29,32 @@ function suggestClientType(forme) {
   if (f.includes('individuelle') || f.includes('libéral'))   return 'BNC';
   if (f.includes('limitée') || f.includes('simplifiée') || f.includes('collective')) return 'BIC';
   return 'BIC';
+}
+
+function completionPct(p) {
+  const isEnt = p.type_prospect === 'entreprise';
+  const optional = [
+    !!(p.email || p.telephone || p.contact_email || p.contact_telephone),
+    !!p.adresse,
+    !!p.ville,
+    !!p.source,
+    !!p.notes,
+    !!p.activite,
+    ...(isEnt ? [!!p.siren, !!p.forme_juridique] : [!!p.contact_prenom]),
+  ];
+  return Math.round(optional.filter(Boolean).length / optional.length * 100);
+}
+
+function CompletionBar({ pct }) {
+  const color = pct >= 80 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#94a3b8';
+  return (
+    <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, height: 3, borderRadius: 2, background: '#e2e8f0', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 2, transition: 'width 0.3s' }} />
+      </div>
+      <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{pct}%</span>
+    </div>
+  );
 }
 
 function StatutBadge({ s }) {
@@ -47,11 +80,11 @@ function Modal({ title, onClose, children, wide }) {
   );
 }
 
-// ── Bloc SIREN lookup (réutilisé dans ProspectForm ET dans ClientForm) ─────────
+// ── Bloc SIREN lookup ─────────────────────────────────────────────────────────
 function SirenLookup({ onResult }) {
   const [siren, setSiren] = useState('');
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState(null); // { type: 'error'|'info', text }
+  const [msg, setMsg] = useState(null);
 
   const search = async () => {
     const clean = siren.replace(/\s/g, '');
@@ -114,6 +147,7 @@ function SirenLookup({ onResult }) {
 }
 
 const EMPTY_FORM = {
+  type_prospect: 'particulier',
   nom: '', siren: '', siret: '', forme_juridique: '', adresse: '', code_postal: '', ville: '',
   capital: '', code_naf: '', activite: '', date_creation_ent: '',
   email: '', telephone: '',
@@ -126,22 +160,24 @@ function ProspectForm({ initial, onSave, onCancel }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const isEdit = !!initial?.id;
+  const isEntreprise = form.type_prospect === 'entreprise';
+  const isParticulier = form.type_prospect === 'particulier';
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const handlePappersResult = (data) => {
     setForm((f) => ({
       ...f,
-      nom:             data.nom             || f.nom,
-      siren:           data.siren           || f.siren,
-      siret:           data.siret           || f.siret,
-      forme_juridique: data.forme_juridique || f.forme_juridique,
-      adresse:         data.adresse         || f.adresse,
-      code_postal:     data.code_postal     || f.code_postal,
-      ville:           data.ville           || f.ville,
-      capital:         data.capital != null  ? String(data.capital) : f.capital,
-      code_naf:        data.code_naf        || f.code_naf,
-      activite:        data.activite        || f.activite,
+      nom:               data.nom             || f.nom,
+      siren:             data.siren           || f.siren,
+      siret:             data.siret           || f.siret,
+      forme_juridique:   data.forme_juridique || f.forme_juridique,
+      adresse:           data.adresse         || f.adresse,
+      code_postal:       data.code_postal     || f.code_postal,
+      ville:             data.ville           || f.ville,
+      capital:           data.capital != null  ? String(data.capital) : f.capital,
+      code_naf:          data.code_naf        || f.code_naf,
+      activite:          data.activite        || f.activite,
       date_creation_ent: data.date_creation_ent || f.date_creation_ent,
     }));
   };
@@ -149,9 +185,18 @@ function ProspectForm({ initial, onSave, onCancel }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!form.nom.trim()) { setError('Le nom est requis'); return; }
+    if (!form.nom.trim()) {
+      setError(isParticulier ? 'Le nom est requis' : 'La raison sociale est requise');
+      return;
+    }
+    const hasContact = form.email || form.telephone || form.contact_email || form.contact_telephone;
+    if (!hasContact) {
+      setError('Au moins un email ou numéro de téléphone est requis');
+      return;
+    }
     if (form.siren && !/^\d{9}$/.test(form.siren.replace(/\s/g, ''))) {
-      setError('Le SIREN doit contenir exactement 9 chiffres'); return;
+      setError('Le SIREN doit contenir exactement 9 chiffres');
+      return;
     }
     setLoading(true);
     try {
@@ -170,45 +215,86 @@ function ProspectForm({ initial, onSave, onCancel }) {
     }
   };
 
+  const sectionStyle = { margin: '20px 0 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' };
+
   return (
     <form onSubmit={handleSubmit}>
       {error && <div className="alert alert-error">{error}</div>}
 
-      {!isEdit && <SirenLookup onResult={handlePappersResult} />}
+      {/* Type de prospect */}
+      <div className="form-group">
+        <label className="form-label">Type de prospect *</label>
+        <select className="form-control" value={form.type_prospect} onChange={set('type_prospect')}>
+          <option value="particulier">Particulier / futur créateur</option>
+          <option value="entreprise">Entreprise existante</option>
+          <option value="association">Association</option>
+          <option value="autre">Autre</option>
+        </select>
+      </div>
 
-      {/* ── Entreprise ─────────── */}
-      <div style={{ marginBottom: 6, fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Informations entreprise</div>
+      {/* Pappers lookup — entreprise only */}
+      {!isEdit && isEntreprise && <SirenLookup onResult={handlePappersResult} />}
+
+      {/* Identification */}
+      <div style={sectionStyle}>{isParticulier ? 'Identité' : 'Informations'}</div>
+
+      {isParticulier ? (
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Prénom</label>
+            <input className="form-control" value={form.contact_prenom} onChange={set('contact_prenom')} placeholder="Jean" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Nom *</label>
+            <input className="form-control" value={form.nom} onChange={set('nom')} placeholder="Dupont" />
+          </div>
+        </div>
+      ) : (
+        <div className="form-group">
+          <label className="form-label">Raison sociale *</label>
+          <input className="form-control" value={form.nom} onChange={set('nom')} placeholder="SARL Exemple…" />
+        </div>
+      )}
+
+      {/* SIREN section — entreprise only */}
+      {isEntreprise && (
+        <>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">SIREN</label>
+              <input className="form-control" value={form.siren} onChange={set('siren')} placeholder="123456789" maxLength={9} style={{ fontFamily: 'monospace', letterSpacing: '0.1em' }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">SIRET siège</label>
+              <input className="form-control" value={form.siret} onChange={set('siret')} placeholder="12345678900001" maxLength={14} style={{ fontFamily: 'monospace' }} />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Forme juridique</label>
+              <input className="form-control" value={form.forme_juridique} onChange={set('forme_juridique')} placeholder="SARL, SAS, SA…" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Code NAF</label>
+              <input className="form-control" value={form.code_naf} onChange={set('code_naf')} placeholder="64.19Z" />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Capital (€)</label>
+              <input type="number" className="form-control" value={form.capital} onChange={set('capital')} placeholder="10000" min="0" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date de création</label>
+              <input type="date" className="form-control" value={form.date_creation_ent ? form.date_creation_ent.substring(0, 10) : ''} onChange={set('date_creation_ent')} />
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="form-group">
-        <label className="form-label">Raison sociale *</label>
-        <input className="form-control" value={form.nom} onChange={set('nom')} required placeholder="SARL Exemple…" />
-      </div>
-
-      <div className="form-row">
-        <div className="form-group">
-          <label className="form-label">SIREN</label>
-          <input className="form-control" value={form.siren} onChange={set('siren')} placeholder="123456789" maxLength={9} style={{ fontFamily: 'monospace', letterSpacing: '0.1em' }} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">SIRET siège</label>
-          <input className="form-control" value={form.siret} onChange={set('siret')} placeholder="12345678900001" maxLength={14} style={{ fontFamily: 'monospace' }} />
-        </div>
-      </div>
-
-      <div className="form-row">
-        <div className="form-group">
-          <label className="form-label">Forme juridique</label>
-          <input className="form-control" value={form.forme_juridique} onChange={set('forme_juridique')} placeholder="SARL, SAS, SA…" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Code NAF</label>
-          <input className="form-control" value={form.code_naf} onChange={set('code_naf')} placeholder="64.19Z" />
-        </div>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Activité</label>
-        <input className="form-control" value={form.activite} onChange={set('activite')} placeholder="Libellé de l'activité" />
+        <label className="form-label">Activité / description</label>
+        <input className="form-control" value={form.activite} onChange={set('activite')} placeholder="Libellé de l'activité ou description" />
       </div>
 
       <div className="form-group">
@@ -227,23 +313,15 @@ function ProspectForm({ initial, onSave, onCancel }) {
         </div>
       </div>
 
-      <div className="form-row">
-        <div className="form-group">
-          <label className="form-label">Capital (€)</label>
-          <input type="number" className="form-control" value={form.capital} onChange={set('capital')} placeholder="10000" min="0" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Date de création</label>
-          <input type="date" className="form-control" value={form.date_creation_ent ? form.date_creation_ent.substring(0, 10) : ''} onChange={set('date_creation_ent')} />
-        </div>
+      {/* Contact */}
+      <div style={sectionStyle}>
+        Contact{' '}
+        <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 10 }}>(au moins un requis)</span>
       </div>
 
-      {/* ── Contact ────────────── */}
-      <div style={{ margin: '20px 0 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Contact</div>
-
       <div className="form-row">
         <div className="form-group">
-          <label className="form-label">Email entreprise</label>
+          <label className="form-label">Email</label>
           <input type="email" className="form-control" value={form.email} onChange={set('email')} placeholder="contact@exemple.fr" />
         </div>
         <div className="form-group">
@@ -252,30 +330,34 @@ function ProspectForm({ initial, onSave, onCancel }) {
         </div>
       </div>
 
-      <div className="form-row">
-        <div className="form-group">
-          <label className="form-label">Prénom interlocuteur</label>
-          <input className="form-control" value={form.contact_prenom} onChange={set('contact_prenom')} placeholder="Jean" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Nom interlocuteur</label>
-          <input className="form-control" value={form.contact_nom} onChange={set('contact_nom')} placeholder="Dupont" />
-        </div>
-      </div>
+      {/* Interlocuteur — non-particulier only */}
+      {!isParticulier && (
+        <>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Prénom interlocuteur</label>
+              <input className="form-control" value={form.contact_prenom} onChange={set('contact_prenom')} placeholder="Jean" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Nom interlocuteur</label>
+              <input className="form-control" value={form.contact_nom} onChange={set('contact_nom')} placeholder="Dupont" />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Email interlocuteur</label>
+              <input type="email" className="form-control" value={form.contact_email} onChange={set('contact_email')} placeholder="jean.dupont@exemple.fr" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Tél. interlocuteur</label>
+              <input className="form-control" value={form.contact_telephone} onChange={set('contact_telephone')} placeholder="+33 6 12 34 56 78" />
+            </div>
+          </div>
+        </>
+      )}
 
-      <div className="form-row">
-        <div className="form-group">
-          <label className="form-label">Email interlocuteur</label>
-          <input type="email" className="form-control" value={form.contact_email} onChange={set('contact_email')} placeholder="jean.dupont@exemple.fr" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Tél. interlocuteur</label>
-          <input className="form-control" value={form.contact_telephone} onChange={set('contact_telephone')} placeholder="+33 6 12 34 56 78" />
-        </div>
-      </div>
-
-      {/* ── Suivi CRM ──────────── */}
-      <div style={{ margin: '20px 0 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Suivi commercial</div>
+      {/* Suivi commercial */}
+      <div style={sectionStyle}>Suivi commercial</div>
 
       <div className="form-row">
         <div className="form-group">
@@ -382,13 +464,12 @@ export default function Prospects() {
   };
 
   const filtered = prospects.filter((p) => {
-    const matchSearch = `${p.nom} ${p.siren || ''} ${p.ville || ''} ${p.forme_juridique || ''}`
+    const matchSearch = `${p.nom} ${p.siren || ''} ${p.ville || ''} ${p.forme_juridique || ''} ${p.contact_prenom || ''} ${p.contact_nom || ''}`
       .toLowerCase().includes(search.toLowerCase());
     const matchStatut = filterStatut ? p.statut === filterStatut : true;
     return matchSearch && matchStatut;
   });
 
-  // KPI counts
   const counts = Object.fromEntries(
     Object.keys(STATUTS).map((k) => [k, prospects.filter((p) => p.statut === k).length])
   );
@@ -463,9 +544,9 @@ export default function Prospects() {
               <table>
                 <thead>
                   <tr>
-                    <th>Raison sociale</th>
+                    <th>Nom / Raison sociale</th>
+                    <th>Type</th>
                     <th>SIREN</th>
-                    <th>Forme juridique</th>
                     <th>Ville</th>
                     <th>Statut</th>
                     <th>Source</th>
@@ -474,63 +555,72 @@ export default function Prospects() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((p) => (
-                    <tr key={p.id}>
-                      <td>
-                        <strong>{p.nom}</strong>
-                        {p.activite && (
-                          <div className="text-muted text-sm" style={{ marginTop: 2 }}>{p.activite}</div>
-                        )}
-                      </td>
-                      <td>
-                        <code style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                          {p.siren || '—'}
-                        </code>
-                      </td>
-                      <td>
-                        <span className="text-sm">{p.forme_juridique || <span className="text-muted">—</span>}</span>
-                      </td>
-                      <td>
-                        {p.ville
-                          ? <span>{p.ville}{p.code_postal && <span className="text-muted"> ({p.code_postal})</span>}</span>
-                          : <span className="text-muted">—</span>
-                        }
-                      </td>
-                      <td><StatutBadge s={p.statut} /></td>
-                      <td><span className="text-muted text-sm">{p.source || '—'}</span></td>
-                      <td>{new Date(p.cree_le).toLocaleDateString('fr-FR')}</td>
-                      {isExpertOrChef && (
-                        <td>
-                          <div className="td-actions">
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setModal({ type: 'edit', prospect: p })}
-                            >
-                              ✏️
-                            </button>
-                            {p.statut !== 'converti' && (
-                              <button
-                                className="btn btn-accent btn-sm"
-                                onClick={() => setModal({ type: 'convertir', prospect: p })}
-                              >
-                                → Client
-                              </button>
-                            )}
-                            {p.statut === 'converti' && p.client_id && (
-                              <span className="badge" style={{ background: '#e8f5f3', color: '#00695c' }}>
-                                Converti
-                              </span>
-                            )}
-                            {user?.role === 'expert' && (
-                              <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p)}>
-                                🗑
-                              </button>
-                            )}
-                          </div>
+                  {filtered.map((p) => {
+                    const pct = completionPct(p);
+                    const displayName = p.type_prospect === 'particulier' && p.contact_prenom
+                      ? `${p.contact_prenom} ${p.nom}`
+                      : p.nom;
+                    return (
+                      <tr key={p.id}>
+                        <td style={{ minWidth: 180 }}>
+                          <strong>{displayName}</strong>
+                          {p.activite && (
+                            <div className="text-muted text-sm" style={{ marginTop: 2 }}>{p.activite}</div>
+                          )}
+                          <CompletionBar pct={pct} />
                         </td>
-                      )}
-                    </tr>
-                  ))}
+                        <td>
+                          <span style={{ fontSize: 11, background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                            {TYPE_PROSPECT_LABEL[p.type_prospect] || 'Autre'}
+                          </span>
+                        </td>
+                        <td>
+                          <code style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                            {p.siren || '—'}
+                          </code>
+                        </td>
+                        <td>
+                          {p.ville
+                            ? <span>{p.ville}{p.code_postal && <span className="text-muted"> ({p.code_postal})</span>}</span>
+                            : <span className="text-muted">—</span>
+                          }
+                        </td>
+                        <td><StatutBadge s={p.statut} /></td>
+                        <td><span className="text-muted text-sm">{p.source || '—'}</span></td>
+                        <td>{new Date(p.cree_le).toLocaleDateString('fr-FR')}</td>
+                        {isExpertOrChef && (
+                          <td>
+                            <div className="td-actions">
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setModal({ type: 'edit', prospect: p })}
+                              >
+                                ✏️
+                              </button>
+                              {p.statut !== 'converti' && (
+                                <button
+                                  className="btn btn-accent btn-sm"
+                                  onClick={() => setModal({ type: 'convertir', prospect: p })}
+                                >
+                                  → Client
+                                </button>
+                              )}
+                              {p.statut === 'converti' && p.client_id && (
+                                <span className="badge" style={{ background: '#e8f5f3', color: '#00695c' }}>
+                                  Converti
+                                </span>
+                              )}
+                              {user?.role === 'expert' && (
+                                <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p)}>
+                                  🗑
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
