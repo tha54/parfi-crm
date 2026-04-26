@@ -1,0 +1,77 @@
+const express = require('express');
+const router = express.Router();
+const pool = require('../config/db');
+const { verifyToken, requireRole } = require('../middleware/auth');
+
+async function nextNumero() {
+  const year = new Date().getFullYear();
+  const [rows] = await pool.query(
+    `SELECT numero FROM lettres_mission WHERE numero LIKE ? ORDER BY id DESC LIMIT 1`,
+    [`LM-${year}-%`]
+  );
+  const seq = rows.length ? parseInt(rows[0].numero.split('-').pop(), 10) + 1 : 1;
+  return `LM-${year}-${String(seq).padStart(3, '0')}`;
+}
+
+router.get('/', verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT l.*, c.nom AS client_nom
+       FROM lettres_mission l LEFT JOIN clients c ON l.client_id = c.id
+       ORDER BY l.createdAt DESC`
+    );
+    res.json(rows);
+  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+router.get('/:id', verifyToken, async (req, res) => {
+  try {
+    const [[l]] = await pool.query(
+      `SELECT l.*, c.nom AS client_nom FROM lettres_mission l LEFT JOIN clients c ON l.client_id = c.id WHERE l.id = ?`,
+      [req.params.id]
+    );
+    if (!l) return res.status(404).json({ message: 'Lettre introuvable' });
+    res.json(l);
+  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const { client_id, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin } = req.body;
+  if (!client_id || !typeMission) return res.status(400).json({ message: 'Client et type de mission requis' });
+  try {
+    const numero = await nextNumero();
+    const [result] = await pool.query(
+      `INSERT INTO lettres_mission (numero, client_id, contactId, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin)
+       VALUES (?, ?, 0, ?, ?, ?, ?, ?)`,
+      [numero, client_id, typeMission, objetMission || null, montantHonorairesHT || 0, dateDebut || null, dateFin || null]
+    );
+    res.status(201).json({ id: result.insertId, numero });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
+});
+
+router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const { statut, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin, client_id } = req.body;
+  try {
+    const fields = [], values = [];
+    if (statut !== undefined) { fields.push('statut = ?'); values.push(statut); }
+    if (typeMission !== undefined) { fields.push('typeMission = ?'); values.push(typeMission); }
+    if (objetMission !== undefined) { fields.push('objetMission = ?'); values.push(objetMission); }
+    if (montantHonorairesHT !== undefined) { fields.push('montantHonorairesHT = ?'); values.push(montantHonorairesHT); }
+    if (dateDebut !== undefined) { fields.push('dateDebut = ?'); values.push(dateDebut); }
+    if (dateFin !== undefined) { fields.push('dateFin = ?'); values.push(dateFin); }
+    if (client_id !== undefined) { fields.push('client_id = ?'); values.push(client_id); }
+    if (!fields.length) return res.status(400).json({ message: 'Aucun champ' });
+    values.push(req.params.id);
+    await pool.query(`UPDATE lettres_mission SET ${fields.join(', ')} WHERE id = ?`, values);
+    res.json({ message: 'Lettre mise à jour' });
+  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+router.delete('/:id', verifyToken, requireRole('expert'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM lettres_mission WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Lettre supprimée' });
+  } catch { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+module.exports = router;
