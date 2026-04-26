@@ -1,44 +1,64 @@
 import { useState, useRef } from 'react';
 import api from '../services/api';
 
-const CRM_FIELDS = ['nom', 'siren', 'type', 'regime', 'collaborateur', '(ignorer)'];
-
-const FIELD_LABELS = {
-  nom: 'Raison sociale',
-  siren: 'SIREN',
-  type: 'Type client',
-  regime: 'Régime TVA',
-  collaborateur: 'Collaborateur',
-};
-
-function StepIndicator({ step }) {
+// ─── Step indicator ───────────────────────────────────────────────────────────
+function Steps({ step }) {
+  const labels = ['Chargement', 'Aperçu', 'Résultat'];
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 28 }}>
-      {[1, 2].map((n, i) => (
-        <div key={n} style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{
-            width: 32,
-            height: 32,
-            borderRadius: '50%',
-            background: step >= n ? '#0F1F4B' : '#e2e8f0',
-            color: step >= n ? '#fff' : '#94a3b8',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 700,
-            fontSize: 14,
-            transition: 'background 0.2s',
-          }}>
-            {n}
+      {labels.map((label, i) => {
+        const n = i + 1;
+        const active = step >= n;
+        return (
+          <div key={n} style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: active ? '#0F1F4B' : '#e2e8f0',
+              color: active ? '#fff' : '#94a3b8',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: 14, flexShrink: 0,
+            }}>{n}</div>
+            <span style={{
+              margin: '0 12px', fontSize: 13,
+              fontWeight: step === n ? 600 : 400,
+              color: active ? '#0F1F4B' : '#94a3b8',
+            }}>{label}</span>
+            {i < labels.length - 1 && (
+              <div style={{ width: 32, height: 2, background: step > n ? '#0F1F4B' : '#e2e8f0', marginRight: 12 }} />
+            )}
           </div>
-          <span style={{ marginLeft: 8, marginRight: i === 0 ? 0 : 0, fontSize: 13, fontWeight: step === n ? 600 : 400, color: step >= n ? '#0F1F4B' : '#94a3b8' }}>
-            {n === 1 ? 'Analyse' : 'Import'}
-          </span>
-          {i === 0 && (
-            <div style={{ width: 48, height: 2, background: step > 1 ? '#0F1F4B' : '#e2e8f0', margin: '0 12px', transition: 'background 0.2s' }} />
-          )}
-        </div>
-      ))}
+        );
+      })}
+    </div>
+  );
+}
+
+function KPI({ value, label, color }) {
+  return (
+    <div className="kpi-card" style={{ flex: 1, minWidth: 100, borderTop: `3px solid ${color}` }}>
+      <div className="kpi-value" style={{ color, fontSize: 26 }}>{value}</div>
+      <div className="kpi-label">{label}</div>
+    </div>
+  );
+}
+
+function Alert({ type, children, onClose }) {
+  const styles = {
+    warning: { bg: '#fffbeb', border: '#fbbf24', color: '#92400e' },
+    error:   { bg: '#fef2f2', border: '#f87171', color: '#991b1b' },
+    info:    { bg: '#eff6ff', border: '#93c5fd', color: '#1e40af' },
+  };
+  const s = styles[type] || styles.info;
+  return (
+    <div style={{
+      background: s.bg, border: `1px solid ${s.border}`, borderRadius: 8,
+      padding: '12px 16px', marginBottom: 16, fontSize: 13, color: s.color,
+      display: 'flex', alignItems: 'flex-start', gap: 10,
+    }}>
+      <span style={{ flex: 1 }}>{children}</span>
+      {onClose && (
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: s.color, fontWeight: 700, fontSize: 16, padding: 0 }}>×</button>
+      )}
     </div>
   );
 }
@@ -47,297 +67,382 @@ export default function TiimeImport() {
   const [step, setStep] = useState(1);
   const [csvText, setCsvText] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [loadingFile, setLoadingFile] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [preview, setPreview] = useState(null); // { headers, rows, validRows, errorRows }
-  const [mapping, setMapping] = useState({}); // header -> CRM field
   const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState(null); // { created, ignored, errors }
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [showErrors, setShowErrors] = useState(false);
   const fileInputRef = useRef(null);
 
-  const handleFileDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
+  // ── File loading ────────────────────────────────────────────────────────────
+  const handleFileChange = (e) => {
+    const file = e.target?.files?.[0] || e.dataTransfer?.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => setCsvText(ev.target.result);
-    reader.readAsText(file, 'UTF-8');
+    reader.readAsText(file, 'ISO-8859-1'); // Tiime exports ISO-8859-1
   };
 
-  const handleDragOver = (e) => { e.preventDefault(); setDragging(true); };
-  const handleDragLeave = () => setDragging(false);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    handleFileChange(e);
+  };
 
+  const loadServerFile = async () => {
+    setLoadingFile(true);
+    setError('');
+    try {
+      const { data } = await api.get('/tiime/server-file');
+      setCsvText(data.text);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Impossible de charger le fichier serveur');
+    } finally {
+      setLoadingFile(false);
+    }
+  };
+
+  // ── Step 1 → 2: analyze ─────────────────────────────────────────────────────
   const handleAnalyze = async () => {
-    if (!csvText.trim()) { setError('Veuillez coller ou charger un fichier CSV.'); return; }
+    if (!csvText.trim()) { setError('Veuillez charger ou coller un fichier CSV.'); return; }
     setError('');
     setAnalyzing(true);
     try {
-      const { data } = await api.post('/tiime/preview', { csv: csvText });
-      setPreview(data);
-      // Auto-build mapping from detected headers
-      const autoMap = {};
-      (data.headers || []).forEach((h) => {
-        const lower = h.toLowerCase();
-        if (lower.includes('nom') || lower.includes('raison') || lower.includes('client')) autoMap[h] = 'nom';
-        else if (lower.includes('siren')) autoMap[h] = 'siren';
-        else if (lower.includes('type') || lower.includes('forme')) autoMap[h] = 'type';
-        else if (lower.includes('regime') || lower.includes('régime') || lower.includes('tva')) autoMap[h] = 'regime';
-        else if (lower.includes('collab') || lower.includes('gestionnaire')) autoMap[h] = 'collaborateur';
-        else autoMap[h] = '(ignorer)';
-      });
-      setMapping(autoMap);
+      const { data } = await api.post('/tiime/analyze', { csv: csvText });
+      setAnalysis(data);
       setStep(2);
     } catch (err) {
-      setError(err.response?.data?.message || 'Erreur lors de l\'analyse du CSV');
+      setError(err.response?.data?.message || "Erreur lors de l'analyse");
     } finally {
       setAnalyzing(false);
     }
   };
 
+  // ── Step 2 → 3: import ──────────────────────────────────────────────────────
   const handleImport = async () => {
-    if (!preview) return;
     setImporting(true);
     setError('');
     try {
-      // Apply mapping to valid rows
-      const mappedRows = (preview.validRows || preview.rows?.filter((r) => !r._error) || []).map((row) => {
-        const mapped = {};
-        Object.entries(mapping).forEach(([header, field]) => {
-          if (field && field !== '(ignorer)') mapped[field] = row[header] ?? row;
-        });
-        return Object.keys(mapped).length > 0 ? mapped : row;
+      const { data } = await api.post('/tiime/import', {
+        csv: csvText,
+        options: { includeArchived },
       });
-
-      const { data } = await api.post('/tiime/import', { rows: mappedRows });
       setResult(data);
       setStep(3);
     } catch (err) {
-      setError(err.response?.data?.message || 'Erreur lors de l\'import');
+      setError(err.response?.data?.message || "Erreur lors de l'import");
     } finally {
       setImporting(false);
     }
   };
 
   const restart = () => {
-    setStep(1);
-    setCsvText('');
-    setPreview(null);
-    setMapping({});
-    setResult(null);
-    setError('');
+    setStep(1); setCsvText(''); setAnalysis(null);
+    setResult(null); setError(''); setShowErrors(false);
   };
 
-  const allRows = preview?.rows || [];
-  const validRows = preview?.validRows || allRows.filter((r) => !r._error);
-  const errorRows = preview?.errorRows || allRows.filter((r) => r._error);
-  const headers = preview?.headers || [];
+  const downloadErrorLog = () => {
+    if (!result?.errorLog?.length) return;
+    const content = result.errorLog
+      .map(e => `Ligne ${e.row} | ${e.nom} | SIREN ${e.siren} | ${e.reason}`)
+      .join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'tiime-import-erreurs.txt';
+    a.click(); URL.revokeObjectURL(url);
+  };
 
   return (
     <>
       <div className="page-header">
         <h1>Import Tiime</h1>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>
+          Import du fichier export dossiers CSV
+        </span>
       </div>
 
       <div className="page-body">
-        <StepIndicator step={step > 2 ? 3 : step} />
+        <Steps step={step} />
 
-        {error && (
-          <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fef2f2', color: '#991b1b', borderRadius: 8, fontSize: 13 }}>
-            {error}
-            <button style={{ marginLeft: 12, cursor: 'pointer', border: 'none', background: 'none', color: '#991b1b', fontWeight: 600 }} onClick={() => setError('')}>×</button>
-          </div>
-        )}
+        {error && <Alert type="error" onClose={() => setError('')}>{error}</Alert>}
 
-        {/* ── STEP 1: Upload & Preview ── */}
+        {/* ════════════════════════════════════════════════════════════════════
+            STEP 1 — Load file
+        ════════════════════════════════════════════════════════════════════ */}
         {step === 1 && (
-          <div className="card">
-            <div className="card-header"><strong>Étape 1 — Charger le fichier CSV Tiime</strong></div>
-            <div className="card-body">
-              {/* Drop zone */}
-              <div
-                onDrop={handleFileDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  border: `2px dashed ${dragging ? '#0F1F4B' : '#cbd5e1'}`,
-                  borderRadius: 12,
-                  padding: '40px 24px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: dragging ? '#f0f4ff' : '#f8fafc',
-                  transition: 'all 0.15s',
-                  marginBottom: 20,
-                }}
-              >
-                <div style={{ fontSize: 36, marginBottom: 10 }}>📥</div>
-                <div style={{ fontWeight: 600, color: '#0F1F4B', marginBottom: 6 }}>
-                  Glissez-déposez votre fichier CSV ici
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  ou cliquez pour sélectionner un fichier
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  style={{ display: 'none' }}
-                  onChange={handleFileDrop}
-                />
-              </div>
-
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-                — ou collez le contenu CSV directement —
-              </div>
-
-              <div className="form-group">
-                <textarea
-                  className="form-control"
-                  rows={8}
-                  value={csvText}
-                  onChange={(e) => setCsvText(e.target.value)}
-                  placeholder={'nom,siren,type,regime,collaborateur\n"SARL Exemple","123456789","BIC","mensuel","Martin"\n…'}
-                  style={{ fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleAnalyze}
-                  disabled={analyzing || !csvText.trim()}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Drop zone */}
+            <div className="card">
+              <div className="card-header"><strong>Charger le fichier CSV Tiime</strong></div>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    border: `2px dashed ${dragging ? '#0F1F4B' : '#cbd5e1'}`,
+                    borderRadius: 12, padding: '36px 24px', textAlign: 'center',
+                    cursor: 'pointer', background: dragging ? '#f0f4ff' : '#f8fafc',
+                    transition: 'all 0.15s',
+                  }}
                 >
-                  {analyzing ? 'Analyse en cours…' : '🔍 Analyser'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── STEP 2: Confirm mapping & import ── */}
-        {step === 2 && preview && (
-          <>
-            {/* Summary */}
-            <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
-              <div className="kpi-card" style={{ flex: 1, borderTop: '3px solid #10b981' }}>
-                <div className="kpi-value" style={{ color: '#10b981' }}>{validRows.length}</div>
-                <div className="kpi-label">Lignes valides</div>
-              </div>
-              <div className="kpi-card" style={{ flex: 1, borderTop: '3px solid #ef4444' }}>
-                <div className="kpi-value" style={{ color: '#ef4444' }}>{errorRows.length}</div>
-                <div className="kpi-label">Erreurs</div>
-              </div>
-              <div className="kpi-card" style={{ flex: 1, borderTop: '3px solid #0F1F4B' }}>
-                <div className="kpi-value" style={{ color: '#0F1F4B' }}>{allRows.length}</div>
-                <div className="kpi-label">Total lignes</div>
-              </div>
-            </div>
-
-            {/* Column mapping */}
-            {headers.length > 0 && (
-              <div className="card" style={{ marginBottom: 20 }}>
-                <div className="card-header"><strong>Correspondance des colonnes</strong></div>
-                <div className="card-body">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px' }}>
-                    {headers.map((h) => (
-                      <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span style={{ flex: 1, fontSize: 13, fontFamily: 'monospace', color: '#0F1F4B', fontWeight: 600 }}>{h}</span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>→</span>
-                        <select
-                          className="form-control"
-                          style={{ flex: 1 }}
-                          value={mapping[h] || '(ignorer)'}
-                          onChange={(e) => setMapping((m) => ({ ...m, [h]: e.target.value }))}
-                        >
-                          {CRM_FIELDS.map((f) => (
-                            <option key={f} value={f}>{f === '(ignorer)' ? '(ignorer)' : FIELD_LABELS[f] || f}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
+                  <div style={{ fontSize: 36, marginBottom: 10 }}>📥</div>
+                  <div style={{ fontWeight: 600, color: '#0F1F4B', marginBottom: 4 }}>
+                    Glissez votre fichier CSV ici
                   </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    ou cliquez pour sélectionner — encodage ISO-8859-1 géré automatiquement
+                  </div>
+                  <input
+                    ref={fileInputRef} type="file" accept=".csv,text/csv"
+                    style={{ display: 'none' }} onChange={handleFileChange}
+                  />
                 </div>
-              </div>
-            )}
 
-            {/* Preview table */}
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header"><strong>Aperçu des données</strong></div>
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      {headers.map((h) => <th key={h}>{h}</th>)}
-                      <th>Statut</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allRows.slice(0, 50).map((row, i) => (
-                      <tr
-                        key={i}
-                        style={{ background: row._error ? '#fef2f2' : undefined }}
-                        title={row._error || undefined}
-                      >
-                        {headers.map((h) => (
-                          <td key={h} style={{ fontSize: 13 }}>{row[h] ?? '—'}</td>
-                        ))}
-                        <td>
-                          {row._error ? (
-                            <span className="badge" style={{ background: '#fef2f2', color: '#991b1b' }} title={row._error}>
-                              ⚠️ Erreur
-                            </span>
-                          ) : (
-                            <span className="badge" style={{ background: '#f0fdf4', color: '#166534' }}>✓ Valide</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {allRows.length > 50 && (
-                  <div style={{ padding: '10px 16px', color: 'var(--text-muted)', fontSize: 12 }}>
-                    … et {allRows.length - 50} ligne(s) supplémentaire(s) non affichées.
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <hr style={{ flex: 1, borderColor: '#e2e8f0' }} />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>ou</span>
+                  <hr style={{ flex: 1, borderColor: '#e2e8f0' }} />
+                </div>
+
+                <button
+                  className="btn btn-ghost"
+                  onClick={loadServerFile}
+                  disabled={loadingFile}
+                  style={{ alignSelf: 'center' }}
+                >
+                  {loadingFile ? '⏳ Chargement…' : '🖥️ Charger le fichier serveur (export_dossiers_20260426.csv)'}
+                </button>
+
+                {csvText && (
+                  <div style={{
+                    background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8,
+                    padding: '10px 14px', fontSize: 13, color: '#166534',
+                  }}>
+                    ✓ Fichier chargé — {csvText.split('\n').length} lignes brutes détectées
                   </div>
                 )}
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {/* Options */}
+            <div className="card">
+              <div className="card-header"><strong>Options d'import</strong></div>
+              <div className="card-body">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={includeArchived}
+                    onChange={e => setIncludeArchived(e.target.checked)}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  <span>Importer aussi les dossiers <strong>Fin de mission</strong> (archivés, actif = 0)</span>
+                </label>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleAnalyze}
+                disabled={analyzing || !csvText.trim()}
+              >
+                {analyzing ? '⏳ Analyse en cours…' : '🔍 Analyser le fichier'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            STEP 2 — Preview & confirm
+        ════════════════════════════════════════════════════════════════════ */}
+        {step === 2 && analysis && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* KPIs */}
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <KPI value={analysis.total}     label="Total dossiers"          color="#0F1F4B" />
+              <KPI value={analysis.actif}     label="Actifs à importer"       color="#10b981" />
+              <KPI value={analysis.archive}   label="Archivés (Fin mission)"  color="#f59e0b" />
+              <KPI value={analysis.prospects} label="Prospects (Création)"    color="#8b5cf6" />
+              <KPI value={analysis.duplicates} label="Doublons (SIREN exist.)" color="#ef4444" />
+            </div>
+
+            {/* Sensitive notes warning */}
+            {analysis.hasSensitiveNotes && (
+              <Alert type="warning">
+                <strong>⚠️ Données sensibles détectées</strong><br />
+                Le champ "Note dossier" contient des données potentiellement sensibles (identifiants, mots de passe, numéros URSSAF…).
+                Ces notes seront stockées chiffrées (AES-256-GCM) dans le champ <code>notes_sensibles</code>.
+                Vérifiez les droits d'accès à votre base de données avant de continuer.
+              </Alert>
+            )}
+
+            {/* Unmatched users warning */}
+            {analysis.unmatchedUsers?.length > 0 && (
+              <Alert type="info">
+                <strong>Collaborateurs non reconnus</strong> — les noms suivants ne correspondent à aucun utilisateur CRM et ne seront pas attribués :<br />
+                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                  {analysis.unmatchedUsers.join(', ')}
+                </span>
+              </Alert>
+            )}
+
+            {/* Preview table */}
+            <div className="card">
+              <div className="card-header">
+                <strong>Aperçu — 10 premiers dossiers actifs</strong>
+                <span className="text-muted text-sm">{analysis.actif} dossiers actifs au total</span>
+              </div>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nom / Code</th>
+                      <th>Raison sociale</th>
+                      <th>SIREN</th>
+                      <th>Forme jur.</th>
+                      <th>Ville</th>
+                      <th>Type CRM</th>
+                      <th>Régime TVA</th>
+                      <th>Régime fiscal</th>
+                      <th>Groupe</th>
+                      <th>Expert</th>
+                      <th>Doublon</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysis.preview.map((row, i) => (
+                      <tr key={i} style={{ background: row.isDuplicate ? '#fff7ed' : undefined }}>
+                        <td><strong style={{ fontSize: 13 }}>{row.nom}</strong></td>
+                        <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{row.raison_sociale || '—'}</td>
+                        <td><code style={{ fontSize: 11 }}>{row.siren || '—'}</code></td>
+                        <td style={{ fontSize: 12 }}>{row.forme_juridique || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{row.ville || '—'}</td>
+                        <td>
+                          <span className="badge" style={{ background: '#eff6ff', color: '#1d4ed8', fontSize: 11 }}>
+                            {row.type}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12 }}>{row.regime_tva || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{row.regime_fiscal || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{row.groupe || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{row.expert || '—'}</td>
+                        <td>
+                          {row.isDuplicate
+                            ? <span className="badge" style={{ background: '#fff7ed', color: '#c2410c', fontSize: 11 }}>⚠️ Doublon</span>
+                            : <span className="badge" style={{ background: '#f0fdf4', color: '#166534', fontSize: 11 }}>✓ Nouveau</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Import summary */}
+            <div style={{
+              background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+              padding: '16px 20px', fontSize: 13,
+            }}>
+              <strong style={{ display: 'block', marginBottom: 8, color: '#0F1F4B' }}>Résumé de l'import prévu</strong>
+              <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 2 }}>
+                <li><strong style={{ color: '#10b981' }}>{analysis.actif - analysis.duplicates}</strong> dossiers actifs seront créés comme clients</li>
+                {includeArchived && <li><strong style={{ color: '#f59e0b' }}>{analysis.archive}</strong> dossiers archivés seront créés (actif = 0)</li>}
+                {analysis.prospects > 0 && <li><strong style={{ color: '#8b5cf6' }}>{analysis.prospects}</strong> dossier(s) en création seront importés comme prospects</li>}
+                <li><strong style={{ color: '#ef4444' }}>{analysis.duplicates}</strong> doublon(s) SIREN seront ignorés</li>
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn btn-ghost" onClick={() => setStep(1)}>← Retour</button>
               <button
                 className="btn btn-primary"
                 onClick={handleImport}
-                disabled={importing || validRows.length === 0}
+                disabled={importing}
+                style={{ minWidth: 200 }}
               >
-                {importing ? 'Import en cours…' : `Importer ${validRows.length} client(s)`}
+                {importing
+                  ? '⏳ Import en cours…'
+                  : `Importer ${analysis.actif - analysis.duplicates + (includeArchived ? analysis.archive : 0)} dossiers`
+                }
               </button>
             </div>
-          </>
+          </div>
         )}
 
-        {/* ── STEP 3: Result ── */}
+        {/* ════════════════════════════════════════════════════════════════════
+            STEP 3 — Result
+        ════════════════════════════════════════════════════════════════════ */}
         {step === 3 && result && (
-          <div className="card">
-            <div className="card-body" style={{ textAlign: 'center', padding: '40px 24px' }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
-              <h2 style={{ color: '#0F1F4B', marginBottom: 24 }}>Import terminé</h2>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginBottom: 32 }}>
-                <div className="kpi-card" style={{ minWidth: 120, borderTop: '3px solid #10b981' }}>
-                  <div className="kpi-value" style={{ color: '#10b981' }}>{result.created ?? 0}</div>
-                  <div className="kpi-label">Créés</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="card">
+              <div className="card-body" style={{ textAlign: 'center', padding: '32px 24px' }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+                <h2 style={{ color: '#0F1F4B', marginBottom: 24 }}>Import terminé</h2>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
+                  <KPI value={result.created}   label="Clients créés"    color="#10b981" />
+                  {result.archived > 0 && <KPI value={result.archived} label="Archivés créés" color="#f59e0b" />}
+                  {result.prospects > 0 && <KPI value={result.prospects} label="Prospects créés" color="#8b5cf6" />}
+                  <KPI value={result.skipped}   label="Ignorés (doublons / archivés)" color="#94a3b8" />
+                  <KPI value={result.errors}    label="Erreurs"          color={result.errors > 0 ? '#ef4444' : '#94a3b8'} />
                 </div>
-                <div className="kpi-card" style={{ minWidth: 120, borderTop: '3px solid #f59e0b' }}>
-                  <div className="kpi-value" style={{ color: '#f59e0b' }}>{result.ignored ?? 0}</div>
-                  <div className="kpi-label">Ignorés</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+                  {result.created} client(s) importés · {result.skipped} ignoré(s) · {result.errors} erreur(s)
                 </div>
-                <div className="kpi-card" style={{ minWidth: 120, borderTop: '3px solid #ef4444' }}>
-                  <div className="kpi-value" style={{ color: '#ef4444' }}>{result.errors ?? 0}</div>
-                  <div className="kpi-label">Erreurs</div>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                  <button className="btn btn-ghost" onClick={restart}>🔄 Nouvel import</button>
+                  {result.errors > 0 && (
+                    <button className="btn btn-ghost" onClick={downloadErrorLog}>
+                      📄 Télécharger le rapport d'erreurs
+                    </button>
+                  )}
                 </div>
               </div>
-              <button className="btn btn-primary" onClick={restart}>🔄 Recommencer</button>
             </div>
+
+            {/* Error log */}
+            {result.errorLog?.length > 0 && (
+              <div className="card">
+                <div className="card-header">
+                  <strong style={{ color: '#991b1b' }}>Journal des erreurs ({result.errorLog.length})</strong>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setShowErrors(v => !v)}
+                  >
+                    {showErrors ? 'Masquer' : 'Afficher'}
+                  </button>
+                </div>
+                {showErrors && (
+                  <div className="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Ligne CSV</th>
+                          <th>Nom</th>
+                          <th>SIREN</th>
+                          <th>Raison</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.errorLog.map((e, i) => (
+                          <tr key={i} style={{ background: '#fef2f2' }}>
+                            <td style={{ fontSize: 12, fontFamily: 'monospace' }}>#{e.row}</td>
+                            <td style={{ fontSize: 13 }}>{e.nom}</td>
+                            <td><code style={{ fontSize: 11 }}>{e.siren}</code></td>
+                            <td style={{ fontSize: 12, color: '#991b1b' }}>{e.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
