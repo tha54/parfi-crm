@@ -4,31 +4,37 @@ const pool = require('../config/db');
 const { verifyToken, requireRole } = require('../middleware/auth');
 
 // List clients — based on role
+// Uses correlated subquery for collaborateurs to guarantee exactly one row per client.
 router.get('/', verifyToken, async (req, res) => {
   try {
     let rows;
+    const collab_sub = `(
+      SELECT GROUP_CONCAT(
+               DISTINCT CONCAT(u.prenom,'|',u.nom,'|',a2.role_sur_dossier)
+               ORDER BY a2.role_sur_dossier DESC, u.nom
+               SEPARATOR ','
+             )
+      FROM attributions a2
+      JOIN utilisateurs u ON u.id = a2.utilisateur_id
+      WHERE a2.client_id = c.id
+    ) AS equipe`;
+
     if (req.user.role === 'expert' || req.user.role === 'chef_mission') {
       [rows] = await pool.query(
-        `SELECT c.*,
-          GROUP_CONCAT(DISTINCT CONCAT(u.prenom, ' ', u.nom) ORDER BY u.nom SEPARATOR ', ') AS collaborateurs
+        `SELECT c.*, ${collab_sub}
          FROM clients c
-         LEFT JOIN attributions a ON c.id = a.client_id
-         LEFT JOIN utilisateurs u ON a.utilisateur_id = u.id
          WHERE c.actif = 1
-         GROUP BY c.id
          ORDER BY c.nom`
       );
     } else {
       [rows] = await pool.query(
-        `SELECT c.*,
-          GROUP_CONCAT(DISTINCT CONCAT(u.prenom, ' ', u.nom) ORDER BY u.nom SEPARATOR ', ') AS collaborateurs
+        `SELECT c.*, ${collab_sub}
          FROM clients c
-         JOIN attributions a ON c.id = a.client_id
-         LEFT JOIN utilisateurs u2 ON a.utilisateur_id = u2.id
-         LEFT JOIN attributions a2 ON c.id = a2.client_id
-         LEFT JOIN utilisateurs u ON a2.utilisateur_id = u.id
-         WHERE c.actif = 1 AND a.utilisateur_id = ?
-         GROUP BY c.id
+         WHERE c.actif = 1
+           AND EXISTS (
+             SELECT 1 FROM attributions a
+             WHERE a.client_id = c.id AND a.utilisateur_id = ?
+           )
          ORDER BY c.nom`,
         [req.user.id]
       );
@@ -75,7 +81,11 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
 
 // Update client — expert & chef_mission
 router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
-  const { nom, siren, type, regime, actif, notes_riches } = req.body;
+  const {
+    nom, siren, type, regime, actif, notes_riches,
+    complexite, source_acquisition, ca_mensuel_signe, ca_mensuel_perdu,
+    motif_fin, motif_detail, etait_previsible
+  } = req.body;
   try {
     const [[prev]] = await pool.query('SELECT nom, siren, type, regime, actif FROM clients WHERE id = ?', [req.params.id]);
     const fields = [], values = [], changed = [];
@@ -85,6 +95,13 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     if (regime !== undefined) { fields.push('regime = ?'); values.push(regime); changed.push('regime'); }
     if (actif !== undefined) { fields.push('actif = ?'); values.push(actif); changed.push('actif'); }
     if (notes_riches !== undefined) { fields.push('notes_riches = ?'); values.push(notes_riches); changed.push('notes_riches'); }
+    if (complexite !== undefined) { fields.push('complexite = ?'); values.push(complexite || null); changed.push('complexite'); }
+    if (source_acquisition !== undefined) { fields.push('source_acquisition = ?'); values.push(source_acquisition || null); changed.push('source_acquisition'); }
+    if (ca_mensuel_signe !== undefined) { fields.push('ca_mensuel_signe = ?'); values.push(ca_mensuel_signe || null); changed.push('ca_mensuel_signe'); }
+    if (ca_mensuel_perdu !== undefined) { fields.push('ca_mensuel_perdu = ?'); values.push(ca_mensuel_perdu || null); changed.push('ca_mensuel_perdu'); }
+    if (motif_fin !== undefined) { fields.push('motif_fin = ?'); values.push(motif_fin || null); changed.push('motif_fin'); }
+    if (motif_detail !== undefined) { fields.push('motif_detail = ?'); values.push(motif_detail || null); changed.push('motif_detail'); }
+    if (etait_previsible !== undefined) { fields.push('etait_previsible = ?'); values.push(etait_previsible); changed.push('etait_previsible'); }
     if (fields.length === 0) return res.status(400).json({ message: 'Aucun champ à modifier' });
     values.push(req.params.id);
     await pool.query(`UPDATE clients SET ${fields.join(', ')} WHERE id = ?`, values);

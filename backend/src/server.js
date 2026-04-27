@@ -35,6 +35,12 @@ const auditRoutes = require('./routes/audit');
 const automationsRoutes = require('./routes/automations');
 const intakeRoutes = require('./routes/intake');
 const tiimeRoutes = require('./routes/tiime');
+const tacheTempsRoutes = require('./routes/tacheTemps');
+const contratsRoutes = require('./routes/contrats');
+const callsRoutes = require('./routes/calls');
+const searchRoutes = require('./routes/search');
+const absencesRoutes = require('./routes/absences');
+const rapportsRoutes = require('./routes/rapports');
 
 const app = express();
 
@@ -81,8 +87,14 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/automations', automationsRoutes);
 app.use('/api/intake', intakeRoutes);
 app.use('/api/tiime', tiimeRoutes);
+app.use('/api/tache-temps', tacheTempsRoutes);
+app.use('/api/contrats', contratsRoutes);
+app.use('/api/calls', callsRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/absences', absencesRoutes);
+app.use('/api/rapports', rapportsRoutes);
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.1' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.3' }));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Parfi CRM API démarré sur le port ${PORT}`));

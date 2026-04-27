@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import GED from './GED';
 import { marked } from 'marked';
 import AuditLog from '../components/AuditLog';
+import React from 'react';
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 const fmt = (n) =>
@@ -54,28 +55,72 @@ const FACTURE_STATUTS = {
   annulee: { label: 'Annulée', badge: 'inactif', color: '#9b9b9b' },
 };
 
+// ─── Pipeline contrats ────────────────────────────────────────────────────────
+const PIPELINE_STEPS = [
+  { key: 'prospect',       label: 'Prospect' },
+  { key: 'devis_envoye',   label: 'Devis envoyé' },
+  { key: 'devis_accepte',  label: 'Devis accepté' },
+  { key: 'ldm_generee',    label: 'LDM générée' },
+  { key: 'ldm_signee',     label: 'LDM signée' },
+  { key: 'mission_active', label: 'Mission active' },
+];
+
+const PIPELINE_COLOR = {
+  prospect: '#6b7c93', devis_envoye: '#5bb8e8', devis_accepte: '#0288d1',
+  ldm_generee: '#7c3aed', ldm_signee: '#e67e22', mission_active: '#00897b',
+};
+
+const CONTRAT_STATUT_LABELS = {
+  prospect: 'Prospect', devis_envoye: 'Devis envoyé', devis_accepte: 'Devis accepté',
+  ldm_generee: 'LDM générée', ldm_signee: 'LDM signée', mission_active: 'Mission active',
+};
+
+const REVISION_STATUT = {
+  proposee: { label: 'Proposée', badge: 'en_cours' },
+  acceptee: { label: 'Acceptée', badge: 'termine' },
+  refusee:  { label: 'Refusée',  badge: 'reporte' },
+};
+
+const RECURRENCE_LABEL = { none: 'Unique', monthly: 'Mensuelle', quarterly: 'Trimestrielle', yearly: 'Annuelle' };
+const MANDAT_TYPE_LABEL = { prelevement: 'Prélèvement SEPA', impots: 'Mandat fiscal', urssaf: 'URSSAF', autre: 'Autre' };
+
 const DEVIS_STATUT_BADGE = { brouillon: 'autre', envoye: 'en_cours', accepte: 'termine', refuse: 'inactif', expire: 'reporte' };
 const DEVIS_STATUT_LABEL = { brouillon: 'Brouillon', envoye: 'Envoyé', accepte: 'Accepté', refuse: 'Refusé', expire: 'Expiré' };
 const LDM_STATUT_BADGE = { brouillon: 'autre', envoyee: 'en_cours', signee: 'termine', archivee: 'inactif' };
 const LDM_STATUT_LABEL = { brouillon: 'Brouillon', envoyee: 'Envoyée', signee: 'Signée', archivee: 'Archivée' };
 
+const ROLE_LABEL = { expert: 'Expert-comptable', chef_mission: 'Chef de mission', collaborateur: 'Collaborateur' };
+
+const REGIME_TVA_LABEL = {
+  mensuel: 'Mensuel', trimestriel: 'Trimestriel',
+  non_soumis: 'Non soumis à la TVA', 'Simplifié': 'Régime simplifié',
+  annuel: 'Annuel',
+};
+const REGIME_FISCAL_LABEL = {
+  ISRS: 'IS Réel Simplifié', ISRN: 'IS Réel Normal',
+  SCIC: 'SC IS Créances', SCIS: 'SC IS Simplifié',
+  BNC: 'BNC', BICRS: 'BIC Réel Simplifié', BICN: 'BIC Réel Normal',
+};
+
 const TABS = [
-  { key: 'overview', label: 'Vue d\'ensemble' },
-  { key: 'timeline', label: 'Timeline' },
-  { key: 'travaux', label: 'Travaux' },
-  { key: 'taches', label: 'Tâches' },
+  { key: 'overview',   label: "Vue d'ensemble" },
+  { key: 'equipe',     label: 'Équipe & Portefeuille' },
+  { key: 'travaux',    label: 'Travaux' },
+  { key: 'taches',     label: 'Tâches' },
+  { key: 'timeline',   label: 'Timeline' },
   { key: 'facturation', label: 'Facturation' },
-  { key: 'documents', label: 'Documents' },
-  { key: 'notes', label: '📝 Notes' },
-  { key: 'devis', label: 'Devis & LDM' },
-  { key: 'contacts', label: 'Contacts' },
+  { key: 'documents',  label: 'Documents' },
+  { key: 'notes',      label: '📝 Notes' },
+  { key: 'contrats',   label: 'Contrats & LDM' },
+  { key: 'devis',      label: 'Devis' },
+  { key: 'contacts',   label: 'Contacts' },
 ];
 
 // ─── Modal helper ─────────────────────────────────────────────────────────────
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, maxWidth = 480 }) {
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ maxWidth: 480 }}>
+      <div className="modal" style={{ maxWidth }}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
           <button className="modal-close" onClick={onClose}>×</button>
@@ -86,7 +131,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-// ─── Tâche creation modal (from timeline) ─────────────────────────────────────
+// ─── Tâche creation modal ─────────────────────────────────────────────────────
 function TacheModal({ clientId, interactionObjet, users, currentUser, onSave, onClose }) {
   const [form, setForm] = useState({
     utilisateur_id: currentUser?.id || '',
@@ -158,8 +203,112 @@ function TacheModal({ clientId, interactionObjet, users, currentUser, onSave, on
   );
 }
 
+// ─── Interaction creation modal ───────────────────────────────────────────────
+function InteractionModal({ clientId, onSave, onClose }) {
+  const [form, setForm] = useState({
+    type: 'appel',
+    direction: 'entrant',
+    objet: '',
+    contenu: '',
+    urgence: 'normale',
+    duree_minutes: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr('');
+    setSaving(true);
+    try {
+      await api.post('/interactions', {
+        client_id: clientId,
+        type: form.type,
+        direction: form.direction,
+        objet: form.objet || null,
+        contenu: form.contenu || null,
+        urgence: form.urgence,
+        duree_minutes: form.duree_minutes ? parseInt(form.duree_minutes, 10) : null,
+      });
+      onSave();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la création');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Nouvelle interaction" onClose={onClose} maxWidth={540}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Type *</label>
+            <select className="form-control" value={form.type} onChange={set('type')} required>
+              {Object.entries(INTERACTION_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Direction</label>
+            <select className="form-control" value={form.direction} onChange={set('direction')}>
+              <option value="entrant">Entrant</option>
+              <option value="sortant">Sortant</option>
+              <option value="interne">Interne</option>
+            </select>
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Urgence</label>
+            <select className="form-control" value={form.urgence} onChange={set('urgence')}>
+              <option value="normale">Normale</option>
+              <option value="elevee">Élevée</option>
+              <option value="critique">Critique</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Durée (min)</label>
+            <input className="form-control" type="number" min="0" value={form.duree_minutes} onChange={set('duree_minutes')} placeholder="0" />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Objet</label>
+          <input className="form-control" value={form.objet} onChange={set('objet')} placeholder="Sujet de l'interaction" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Contenu</label>
+          <textarea
+            className="form-control"
+            value={form.contenu}
+            onChange={set('contenu')}
+            rows={4}
+            placeholder="Détails, notes, résumé…"
+            style={{ resize: 'vertical' }}
+          />
+        </div>
+        {err && <p className="form-error">{err}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ─── Tab: Vue d'ensemble ──────────────────────────────────────────────────────
-function TabOverview({ client, attributions, factures, taches, missions, clientId }) {
+function TabOverview({ client, attributions, factures, taches, missions, clientId, currentUser, onClientSaved }) {
+  const isExpert = currentUser?.role === 'expert';
+  const [sensitiveUnlocked, setSensitiveUnlocked] = useState(false);
+  const [sensitiveContent, setSensitiveContent] = useState('');
+  const [sensitiveLoading, setSensitiveLoading] = useState(false);
+  const [sensitiveErr, setSensitiveErr] = useState('');
+
   const caFacture = factures.filter((f) => f.statut !== 'brouillon' && f.statut !== 'annulee')
     .reduce((s, f) => s + parseFloat(f.totalHT || 0), 0);
   const impayes = factures.filter((f) => f.statut === 'retard' || f.statut === 'envoyee')
@@ -168,6 +317,22 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
   const tachesEnRetard = taches.filter(
     (t) => t.statut !== 'termine' && t.date_echeance && new Date(t.date_echeance) < new Date()
   ).length;
+
+  const unlockSensitive = async () => {
+    setSensitiveLoading(true);
+    setSensitiveErr('');
+    try {
+      const res = await api.get(`/tiime/client-notes/${clientId}`);
+      setSensitiveContent(res.data.notes_sensibles || '(vide)');
+      setSensitiveUnlocked(true);
+    } catch (e) {
+      setSensitiveErr(e.response?.data?.message || 'Impossible de déchiffrer les notes');
+    } finally {
+      setSensitiveLoading(false);
+    }
+  };
+
+  const adresseComplete = [client.adresse, client.code_postal, client.ville].filter(Boolean).join(', ');
 
   return (
     <div>
@@ -196,7 +361,7 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        {/* Identity card */}
+        {/* Identity card — expanded */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">Identité</span>
@@ -205,15 +370,21 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  ['Nom', client.nom],
+                  ['Dénomination', client.nom],
+                  client.raison_sociale && ['Dirigeant', client.raison_sociale],
+                  client.forme_juridique && ['Forme juridique', client.forme_juridique],
                   ['SIREN', client.siren || '—'],
-                  ['Type', <span key="t" className={`badge badge-${TYPE_BADGE[client.type] || 'autre'}`}>{client.type}</span>],
-                  ['Régime', <span key="r" className={`badge badge-${REGIME_BADGE[client.regime] || 'autre'}`}>{REGIME_LABEL[client.regime] || client.regime}</span>],
+                  client.siret && ['SIRET', client.siret],
+                  adresseComplete && ['Adresse', adresseComplete],
+                  client.email_dirigeant && ['E-mail dirigeant',
+                    <a key="em" href={`mailto:${client.email_dirigeant}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{client.email_dirigeant}</a>
+                  ],
+                  client.telephone_dirigeant && ['Téléphone', client.telephone_dirigeant],
                   ['Statut', <span key="s" className={`badge badge-${client.actif ? 'actif' : 'inactif'}`}>{client.actif ? 'Actif' : 'Inactif'}</span>],
                   ['Client depuis', fmtDate(client.cree_le)],
-                ].map(([label, val]) => (
+                ].filter(Boolean).map(([label, val]) => (
                   <tr key={label} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--text-muted)', fontSize: 12, width: 120, fontWeight: 600 }}>{label}</td>
+                    <td style={{ padding: '8px 0', color: 'var(--text-muted)', fontSize: 12, width: 130, fontWeight: 600 }}>{label}</td>
                     <td style={{ padding: '8px 0', fontSize: 13 }}>{val}</td>
                   </tr>
                 ))}
@@ -222,54 +393,46 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
           </div>
         </div>
 
-        {/* Collaborateurs */}
+        {/* Paramètres comptables — expanded */}
         <div className="card">
-          <div className="card-header">
-            <span className="card-title">Équipe assignée</span>
-          </div>
-          <div className="card-body">
-            {attributions.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Aucun collaborateur assigné.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {attributions.map((a) => (
-                  <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{
-                      width: 36, height: 36, borderRadius: '50%', background: 'var(--primary)',
-                      color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 13, fontWeight: 700, flexShrink: 0,
-                    }}>
-                      {(a.prenom?.[0] || '').toUpperCase()}{(a.nom?.[0] || '').toUpperCase()}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.prenom} {a.nom}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.email}</div>
-                    </div>
-                    <span className={`badge badge-${a.role_sur_dossier === 'responsable' ? 'responsable' : 'assistant'}`} style={{ marginLeft: 'auto' }}>
-                      {a.role_sur_dossier === 'responsable' ? 'Responsable' : 'Assistant'}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          <div className="card-header" style={{ justifyContent: 'space-between' }}>
+            <span className="card-title">Paramètres comptables</span>
+            {isExpert && (
+              <select
+                className="form-control"
+                style={{ width: 'auto', fontSize: 12, padding: '3px 8px' }}
+                value={client.complexite || 'standard'}
+                onChange={async (e) => {
+                  await api.put(`/clients/${clientId}`, { complexite: e.target.value });
+                  onClientSaved();
+                }}
+              >
+                <option value="simple">Simple ×0.8</option>
+                <option value="standard">Standard ×1.0</option>
+                <option value="complexe">Complexe ×1.3</option>
+                <option value="expert">Expert ×1.6</option>
+              </select>
             )}
-          </div>
-        </div>
-
-        {/* Paramètres fiscaux */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Paramètres fiscaux</span>
           </div>
           <div className="card-body">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {[
                   ['Type d\'entité', client.type || '—'],
-                  ['Régime fiscal', REGIME_LABEL[client.regime] || client.regime || '—'],
+                  ['Régime TVA', REGIME_TVA_LABEL[client.regime_tva] || client.regime_tva || '—'],
+                  ['Régime fiscal', REGIME_FISCAL_LABEL[client.regime_fiscal] || client.regime_fiscal || REGIME_LABEL[client.regime] || '—'],
+                  client.capital != null && ['Capital', fmt(client.capital)],
+                  client.code_ape && ['Code APE', client.code_ape],
+                  client.activite && ['Activité', client.activite],
+                  client.date_cloture && ['Date de clôture', fmtDate(client.date_cloture)],
+                  client.groupe && ['Groupe', client.groupe],
+                  client.complexite && ['Complexité', { simple: 'Simple ×0.8', standard: 'Standard ×1.0', complexe: 'Complexe ×1.3', expert: 'Expert ×1.6' }[client.complexite]],
+                  client.source_acquisition && ['Source', client.source_acquisition.replace(/_/g, ' ')],
+                  client.ca_mensuel_signe != null && ['CA mensuel signé', fmt(client.ca_mensuel_signe)],
                   ['E-mail portail', client.portal_email || '—'],
-                ].map(([label, val]) => (
+                ].filter(Boolean).map(([label, val]) => (
                   <tr key={label} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                    <td style={{ padding: '8px 0', color: 'var(--text-muted)', fontSize: 12, width: 160, fontWeight: 600 }}>{label}</td>
+                    <td style={{ padding: '8px 0', color: 'var(--text-muted)', fontSize: 12, width: 140, fontWeight: 600 }}>{label}</td>
                     <td style={{ padding: '8px 0', fontSize: 13 }}>{val}</td>
                   </tr>
                 ))}
@@ -288,7 +451,7 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
               <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Aucune mission.</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {missions.slice(0, 4).map((m) => (
+                {missions.slice(0, 5).map((m) => (
                   <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                     <span style={{
                       width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
@@ -302,6 +465,58 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
             )}
           </div>
         </div>
+
+        {/* Notes sensibles */}
+        <div className="card">
+          <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span className="card-title">🔒 Notes sensibles</span>
+            {isExpert && !sensitiveUnlocked && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={unlockSensitive}
+                disabled={sensitiveLoading}
+                style={{ fontSize: 12 }}
+              >
+                {sensitiveLoading ? 'Déchiffrement…' : '🔓 Déverrouiller'}
+              </button>
+            )}
+            {sensitiveUnlocked && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setSensitiveUnlocked(false)}
+                style={{ fontSize: 12 }}
+              >
+                🔒 Verrouiller
+              </button>
+            )}
+          </div>
+          <div className="card-body">
+            {!sensitiveUnlocked ? (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
+                <p style={{ fontSize: 13, marginBottom: 0 }}>
+                  {isExpert
+                    ? 'Cliquez sur "Déverrouiller" pour afficher les notes confidentielles.'
+                    : 'Ces notes sont réservées à l\'expert-comptable.'}
+                </p>
+                {sensitiveErr && <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{sensitiveErr}</p>}
+              </div>
+            ) : (
+              <pre style={{
+                fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+                padding: 12, margin: 0, fontFamily: 'inherit',
+              }}>
+                {sensitiveContent}
+              </pre>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Notes riches */}
+      <div style={{ marginTop: 20 }}>
+        <TabNotes client={client} clientId={clientId} currentUser={currentUser} onSaved={onClientSaved} />
       </div>
 
       {/* Audit history */}
@@ -317,85 +532,263 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
   );
 }
 
+// ─── Tab: Équipe & Portefeuille ───────────────────────────────────────────────
+function TabEquipe({ attributions, clientId, currentUser, onReload, allUsers }) {
+  const canManage = ['expert', 'chef_mission'].includes(currentUser?.role);
+  const [showModal, setShowModal] = useState(false);
+  const [modalUsers, setModalUsers] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const openModal = () => {
+    const existing = new Set(attributions.map((a) => a.utilisateur_id));
+    setModalUsers(
+      allUsers.map((u) => ({
+        ...u,
+        assigned: existing.has(u.id),
+        attrId: attributions.find((a) => a.utilisateur_id === u.id)?.id || null,
+        role_sur_dossier: attributions.find((a) => a.utilisateur_id === u.id)?.role_sur_dossier || 'assistant',
+      }))
+    );
+    setErr('');
+    setShowModal(true);
+  };
+
+  const toggleUser = (userId) => {
+    setModalUsers((prev) =>
+      prev.map((u) => u.id === userId ? { ...u, assigned: !u.assigned } : u)
+    );
+  };
+
+  const setRoleSurDossier = (userId, role) => {
+    setModalUsers((prev) =>
+      prev.map((u) => u.id === userId ? { ...u, role_sur_dossier: role } : u)
+    );
+  };
+
+  const saveTeam = async () => {
+    setSaving(true);
+    setErr('');
+    try {
+      const existing = new Set(attributions.map((a) => a.utilisateur_id));
+      const toAdd = modalUsers.filter((u) => u.assigned && !existing.has(u.id));
+      const toRemove = attributions.filter((a) => !modalUsers.find((u) => u.id === a.utilisateur_id && u.assigned));
+
+      await Promise.all([
+        ...toAdd.map((u) => api.post('/attributions', {
+          client_id: clientId,
+          utilisateur_id: u.id,
+          role_sur_dossier: u.role_sur_dossier,
+        })),
+        ...toRemove.map((a) => api.delete(`/attributions/${a.id}`)),
+      ]);
+
+      setShowModal(false);
+      onReload();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la mise à jour');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span className="card-title">Équipe assignée ({attributions.length})</span>
+          {canManage && (
+            <button className="btn btn-primary btn-sm" onClick={openModal}>
+              ✏️ Modifier l'équipe
+            </button>
+          )}
+        </div>
+        <div className="card-body">
+          {attributions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>👤</div>
+              <p style={{ fontSize: 13 }}>Aucun collaborateur assigné à ce dossier.</p>
+              {canManage && (
+                <button className="btn btn-primary btn-sm" onClick={openModal} style={{ marginTop: 8 }}>
+                  Assigner des collaborateurs
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {attributions.map((a) => (
+                <div key={a.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '12px 0', borderBottom: '1px solid var(--border-light)',
+                }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: '50%',
+                    background: a.role_sur_dossier === 'responsable' ? 'var(--primary)' : '#5BB8E8',
+                    color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 700, flexShrink: 0,
+                  }}>
+                    {(a.prenom?.[0] || '').toUpperCase()}{(a.nom?.[0] || '').toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{a.prenom} {a.nom}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {a.email} · {ROLE_LABEL[a.role] || a.role}
+                    </div>
+                  </div>
+                  <span className={`badge badge-${a.role_sur_dossier === 'responsable' ? 'responsable' : 'assistant'}`}>
+                    {a.role_sur_dossier === 'responsable' ? 'Responsable' : 'Assistant'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showModal && (
+        <Modal title="Modifier l'équipe" onClose={() => setShowModal(false)} maxWidth={560}>
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            {modalUsers.map((u) => (
+              <div key={u.id} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 0', borderBottom: '1px solid var(--border-light)',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={u.assigned}
+                  onChange={() => toggleUser(u.id)}
+                  style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{u.prenom} {u.nom}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ROLE_LABEL[u.role] || u.role}</div>
+                </div>
+                {u.assigned && (
+                  <select
+                    value={u.role_sur_dossier}
+                    onChange={(e) => setRoleSurDossier(u.id, e.target.value)}
+                    className="form-control"
+                    style={{ width: 140, fontSize: 12, padding: '4px 8px' }}
+                  >
+                    <option value="responsable">Responsable</option>
+                    <option value="assistant">Assistant</option>
+                  </select>
+                )}
+              </div>
+            ))}
+          </div>
+          {err && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{err}</p>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>Annuler</button>
+            <button className="btn btn-primary btn-sm" onClick={saveTeam} disabled={saving}>
+              {saving ? 'Enregistrement…' : '💾 Enregistrer'}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── Tab: Timeline ────────────────────────────────────────────────────────────
-function TabTimeline({ interactions, clientId, users, currentUser, onTacheCreated }) {
-  const [tacheModal, setTacheModal] = useState(null); // interaction objet string
+function TabTimeline({ interactions, clientId, users, currentUser, onTacheCreated, onInteractionCreated }) {
+  const [tacheModal, setTacheModal] = useState(null);
+  const [showInteractionModal, setShowInteractionModal] = useState(false);
 
   const handleTacheSaved = () => {
     setTacheModal(null);
     onTacheCreated();
   };
 
-  if (interactions.length === 0) {
-    return <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Aucune interaction enregistrée.</div></div>;
-  }
+  const handleInteractionSaved = () => {
+    setShowInteractionModal(false);
+    onInteractionCreated();
+  };
 
   return (
     <>
       <div className="card">
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span className="card-title">Timeline des interactions ({interactions.length})</span>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowInteractionModal(true)}>
+            + Nouvelle interaction
+          </button>
+        </div>
         <div className="card-body" style={{ padding: 0 }}>
-          <div style={{ position: 'relative', paddingLeft: 32 }}>
-            {/* Vertical line */}
-            <div style={{ position: 'absolute', left: 20, top: 0, bottom: 0, width: 2, background: 'var(--border)' }} />
-
-            {interactions.map((interaction) => (
-              <div key={interaction.id} style={{ position: 'relative', padding: '20px 24px 20px 0', borderBottom: '1px solid var(--border-light)' }}>
-                {/* Circle on the line */}
-                <div style={{
-                  position: 'absolute', left: -20, top: 22, width: 32, height: 32, borderRadius: '50%',
-                  background: '#fff', border: `2px solid ${URGENCE_COLORS[interaction.urgence] || '#dce6f0'}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
-                  zIndex: 1,
-                }}>
-                  {INTERACTION_ICONS[interaction.type] || '📌'}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontWeight: 700, fontSize: 13 }}>
-                        {INTERACTION_LABELS[interaction.type] || interaction.type}
-                      </span>
-                      {interaction.direction && interaction.direction !== 'interne' && (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', padding: '1px 6px', borderRadius: 4 }}>
-                          {interaction.direction === 'entrant' ? '← Entrant' : '→ Sortant'}
-                        </span>
-                      )}
-                      {interaction.urgence && interaction.urgence !== 'normale' && (
-                        <span style={{ fontSize: 11, color: '#fff', background: URGENCE_COLORS[interaction.urgence], padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
-                          {interaction.urgence === 'elevee' ? 'Élevée' : 'Critique'}
-                        </span>
-                      )}
-                    </div>
-                    {interaction.objet && (
-                      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--primary)', marginBottom: 4 }}>
-                        {interaction.objet}
-                      </div>
-                    )}
-                    {interaction.contenu && (
-                      <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>
-                        {interaction.contenu.length > 300 ? interaction.contenu.slice(0, 300) + '…' : interaction.contenu}
-                      </div>
-                    )}
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {fmtDateTime(interaction.date_interaction)}
-                      {interaction.utilisateur_nom && ` · ${interaction.utilisateur_nom}`}
-                      {interaction.duree_minutes && ` · ${interaction.duree_minutes} min`}
-                    </div>
+          {interactions.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>💬</div>
+              Aucune interaction enregistrée.
+            </div>
+          ) : (
+            <div style={{ position: 'relative', paddingLeft: 32 }}>
+              <div style={{ position: 'absolute', left: 20, top: 0, bottom: 0, width: 2, background: 'var(--border)' }} />
+              {interactions.map((interaction) => (
+                <div key={interaction.id} style={{ position: 'relative', padding: '20px 24px 20px 0', borderBottom: '1px solid var(--border-light)' }}>
+                  <div style={{
+                    position: 'absolute', left: -20, top: 22, width: 32, height: 32, borderRadius: '50%',
+                    background: '#fff', border: `2px solid ${URGENCE_COLORS[interaction.urgence] || '#dce6f0'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
+                    zIndex: 1,
+                  }}>
+                    {INTERACTION_ICONS[interaction.type] || '📌'}
                   </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ flexShrink: 0 }}
-                    onClick={() => setTacheModal(interaction.objet || '')}
-                  >
-                    + Tâche
-                  </button>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>
+                          {INTERACTION_LABELS[interaction.type] || interaction.type}
+                        </span>
+                        {interaction.direction && interaction.direction !== 'interne' && (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', padding: '1px 6px', borderRadius: 4 }}>
+                            {interaction.direction === 'entrant' ? '← Entrant' : '→ Sortant'}
+                          </span>
+                        )}
+                        {interaction.urgence && interaction.urgence !== 'normale' && (
+                          <span style={{ fontSize: 11, color: '#fff', background: URGENCE_COLORS[interaction.urgence], padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
+                            {interaction.urgence === 'elevee' ? 'Élevée' : 'Critique'}
+                          </span>
+                        )}
+                      </div>
+                      {interaction.objet && (
+                        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--primary)', marginBottom: 4 }}>
+                          {interaction.objet}
+                        </div>
+                      )}
+                      {interaction.contenu && (
+                        <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>
+                          {interaction.contenu.length > 300 ? interaction.contenu.slice(0, 300) + '…' : interaction.contenu}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {fmtDateTime(interaction.date_interaction)}
+                        {interaction.utilisateur_nom && ` · ${interaction.utilisateur_nom}`}
+                        {interaction.duree_minutes && ` · ${interaction.duree_minutes} min`}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ flexShrink: 0 }}
+                      onClick={() => setTacheModal(interaction.objet || '')}
+                    >
+                      + Tâche
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {showInteractionModal && (
+        <InteractionModal
+          clientId={clientId}
+          onSave={handleInteractionSaved}
+          onClose={() => setShowInteractionModal(false)}
+        />
+      )}
 
       {tacheModal !== null && (
         <TacheModal
@@ -411,14 +804,70 @@ function TabTimeline({ interactions, clientId, users, currentUser, onTacheCreate
   );
 }
 
+// ─── Prochaines tâches (used inside Travaux tab) ──────────────────────────────
+function ProchainsTaches({ taches }) {
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Prochaines tâches</span>
+      </div>
+      <div className="card-body" style={{ paddingTop: 0 }}>
+        {taches.map((t) => {
+          const isLate = t.date_echeance && new Date(t.date_echeance) < new Date();
+          return (
+            <div key={t.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '9px 0', borderBottom: '1px solid var(--border-light)',
+            }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                background: t.statut === 'en_cours' ? 'var(--accent)' : 'var(--border)',
+              }} />
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t.titre || t.description}</span>
+              {t.prenom && (
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', padding: '1px 6px', borderRadius: 4 }}>
+                  {t.prenom} {t.user_nom}
+                </span>
+              )}
+              {t.date_echeance && (
+                <span style={{ fontSize: 11, color: isLate ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isLate ? 700 : 400, whiteSpace: 'nowrap' }}>
+                  {isLate ? '⚠️ ' : ''}{fmtDate(t.date_echeance)}
+                </span>
+              )}
+              <span className={`badge badge-${TACHE_STATUT_BADGE[t.statut]}`} style={{ fontSize: 10 }}>
+                {TACHE_STATUT_LABEL[t.statut]}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tab: Travaux (Missions) ──────────────────────────────────────────────────
-function TabTravaux({ missions }) {
+function TabTravaux({ missions, taches }) {
+  const prochainesTaches = (taches || [])
+    .filter((t) => t.statut === 'a_faire' || t.statut === 'en_cours')
+    .sort((a, b) => {
+      if (!a.date_echeance) return 1;
+      if (!b.date_echeance) return -1;
+      return new Date(a.date_echeance) - new Date(b.date_echeance);
+    })
+    .slice(0, 6);
+
   if (missions.length === 0) {
-    return <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Aucune mission pour ce client.</div></div>;
+    return (
+      <>
+        <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Aucune mission pour ce client.</div></div>
+        {prochainesTaches.length > 0 && <ProchainsTaches taches={prochainesTaches} />}
+      </>
+    );
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {prochainesTaches.length > 0 && <ProchainsTaches taches={prochainesTaches} />}
       {missions.map((m) => {
         const budget = parseFloat(m.tempsBudgeteH) || 0;
         const passe = parseFloat(m.tempsPasseH) || 0;
@@ -434,8 +883,7 @@ function TabTravaux({ missions }) {
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--primary)' }}>{m.nom}</span>
-                    <span className={`badge badge-${TACHE_STATUT_BADGE[m.statut] || 'autre'}`}
-                      style={{ background: MISSION_STATUTS[m.statut]?.color || '#ccc', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>
+                    <span style={{ background: MISSION_STATUTS[m.statut]?.color || '#ccc', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>
                       {MISSION_STATUTS[m.statut]?.label || m.statut}
                     </span>
                   </div>
@@ -453,7 +901,6 @@ function TabTravaux({ missions }) {
                 </div>
               </div>
 
-              {/* Progress bar */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
                   <span style={{ color: 'var(--text-muted)' }}>Temps passé</span>
@@ -480,9 +927,11 @@ function TabTravaux({ missions }) {
 }
 
 // ─── Tab: Tâches ──────────────────────────────────────────────────────────────
-function TabTaches({ taches: initialTaches, clientId }) {
+function TabTaches({ taches: initialTaches, clientId, users, currentUser, onTacheCreated }) {
   const [taches, setTaches] = useState(initialTaches);
   const [togglingId, setTogglingId] = useState(null);
+  const [filterStatut, setFilterStatut] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => { setTaches(initialTaches); }, [initialTaches]);
 
@@ -493,102 +942,194 @@ function TabTaches({ taches: initialTaches, clientId }) {
       await api.put(`/taches/${tache.id}`, { statut: newStatut });
       setTaches((prev) => prev.map((t) => t.id === tache.id ? { ...t, statut: newStatut } : t));
     } catch {
-      // silent fail
+      // silent
     } finally {
       setTogglingId(null);
     }
   };
 
+  const handleTacheSaved = () => {
+    setShowCreateModal(false);
+    onTacheCreated();
+  };
+
+  const filtered = filterStatut ? taches.filter((t) => t.statut === filterStatut) : taches;
   const grouped = TACHE_STATUTS.reduce((acc, s) => {
-    acc[s] = taches.filter((t) => t.statut === s);
+    acc[s] = filtered.filter((t) => t.statut === s);
     return acc;
   }, {});
 
-  const hasAny = taches.length > 0;
-
-  if (!hasAny) {
-    return <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Aucune tâche pour ce client.</div></div>;
-  }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {TACHE_STATUTS.map((statut) => {
-        const list = grouped[statut];
-        if (list.length === 0) return null;
-        return (
-          <div key={statut} className="card">
-            <div className="card-header">
-              <span className="card-title">
-                {TACHE_STATUT_LABEL[statut]}
-                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>({list.length})</span>
-              </span>
-            </div>
-            <div className="card-body" style={{ paddingTop: 0 }}>
-              {list.map((t) => {
-                const isLate = t.statut !== 'termine' && t.date_echeance && new Date(t.date_echeance) < new Date();
-                const isDone = t.statut === 'termine';
-                return (
-                  <div key={t.id} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0',
-                    borderBottom: '1px solid var(--border-light)', opacity: isDone ? 0.65 : 1,
-                  }}>
-                    <button
-                      onClick={() => toggleTache(t)}
-                      disabled={togglingId === t.id}
-                      style={{
-                        width: 20, height: 20, borderRadius: 4, border: `2px solid ${isDone ? 'var(--success)' : 'var(--border)'}`,
-                        background: isDone ? 'var(--success)' : '#fff', color: '#fff', fontSize: 12,
-                        cursor: 'pointer', flexShrink: 0, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      {isDone ? '✓' : ''}
-                    </button>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, textDecoration: isDone ? 'line-through' : 'none' }}>
-                        {t.titre || t.description}
+    <div>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>Statut :</label>
+          <select
+            className="form-control"
+            style={{ width: 160, fontSize: 12, padding: '5px 10px' }}
+            value={filterStatut}
+            onChange={(e) => setFilterStatut(e.target.value)}
+          >
+            <option value="">Tous ({taches.length})</option>
+            {TACHE_STATUTS.map((s) => (
+              <option key={s} value={s}>{TACHE_STATUT_LABEL[s]} ({taches.filter((t) => t.statut === s).length})</option>
+            ))}
+          </select>
+        </div>
+        {['expert', 'chef_mission'].includes(currentUser?.role) && (
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)}>
+            + Nouvelle tâche
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="card">
+          <div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>
+            {filterStatut ? `Aucune tâche avec le statut "${TACHE_STATUT_LABEL[filterStatut]}".` : 'Aucune tâche pour ce client.'}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {TACHE_STATUTS.map((statut) => {
+            const list = grouped[statut];
+            if (list.length === 0) return null;
+            return (
+              <div key={statut} className="card">
+                <div className="card-header">
+                  <span className="card-title">
+                    {TACHE_STATUT_LABEL[statut]}
+                    <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>({list.length})</span>
+                  </span>
+                </div>
+                <div className="card-body" style={{ paddingTop: 0 }}>
+                  {list.map((t) => {
+                    const isLate = t.statut !== 'termine' && t.date_echeance && new Date(t.date_echeance) < new Date();
+                    const isDone = t.statut === 'termine';
+                    return (
+                      <div key={t.id} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0',
+                        borderBottom: '1px solid var(--border-light)', opacity: isDone ? 0.65 : 1,
+                      }}>
+                        <button
+                          onClick={() => toggleTache(t)}
+                          disabled={togglingId === t.id}
+                          style={{
+                            width: 20, height: 20, borderRadius: 4,
+                            border: `2px solid ${isDone ? 'var(--success)' : 'var(--border)'}`,
+                            background: isDone ? 'var(--success)' : '#fff', color: '#fff', fontSize: 12,
+                            cursor: 'pointer', flexShrink: 0, marginTop: 2,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >
+                          {isDone ? '✓' : ''}
+                        </button>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, textDecoration: isDone ? 'line-through' : 'none' }}>
+                            {t.titre || t.description}
+                          </div>
+                          {t.titre && t.description && (
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{t.description}</div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          {t.duree && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.duree}h</span>}
+                          {t.date_echeance && (
+                            <span style={{ fontSize: 11, color: isLate ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isLate ? 700 : 400 }}>
+                              {isLate ? '⚠️ ' : ''}{fmtDate(t.date_echeance)}
+                            </span>
+                          )}
+                          {t.prenom && (
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', padding: '1px 6px', borderRadius: 4 }}>
+                              {t.prenom} {t.user_nom}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      {t.titre && t.description && (
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{t.description}</div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      {t.duree && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.duree}h</span>}
-                      {t.date_echeance && (
-                        <span style={{ fontSize: 11, color: isLate ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isLate ? 700 : 400 }}>
-                          {isLate ? '⚠️ ' : ''}{fmtDate(t.date_echeance)}
-                        </span>
-                      )}
-                      {t.prenom && (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', padding: '1px 6px', borderRadius: 4 }}>
-                          {t.prenom} {t.user_nom}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showCreateModal && (
+        <TacheModal
+          clientId={clientId}
+          interactionObjet=""
+          users={users}
+          currentUser={currentUser}
+          onSave={handleTacheSaved}
+          onClose={() => setShowCreateModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Plan de facturation (LDM actives) ────────────────────────────────────────
+function PlanFacturation({ ldm }) {
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">📋 Plan de facturation</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>Basé sur les lettres de mission actives</span>
+      </div>
+      <div className="card-body" style={{ paddingTop: 0 }}>
+        {ldm.map((l) => (
+          <div key={l.id} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
+            borderBottom: '1px solid var(--border-light)',
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--primary)' }}>
+                {l.numero} — {CAT_LABELS[l.typeMission] || l.typeMission || 'Mission'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {fmtDate(l.dateDebut)} → {l.dateFin ? fmtDate(l.dateFin) : 'indéfini'}
+              </div>
+            </div>
+            <span className={`badge badge-${LDM_STATUT_BADGE[l.statut] || 'autre'}`}>
+              {LDM_STATUT_LABEL[l.statut] || l.statut}
+            </span>
+            <div style={{ textAlign: 'right', minWidth: 90 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{fmt(l.montantHonorairesHT)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>HT / an</div>
             </div>
           </div>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
 
 // ─── Tab: Facturation ─────────────────────────────────────────────────────────
-function TabFacturation({ factures }) {
+function TabFacturation({ factures, ldm }) {
   const totalHT = factures.reduce((s, f) => s + parseFloat(f.totalHT || 0), 0);
   const totalPaye = factures.reduce((s, f) => s + parseFloat(f.montantPaye || 0), 0);
   const totalDu = factures.filter((f) => ['envoyee', 'retard', 'partielle'].includes(f.statut))
     .reduce((s, f) => s + (parseFloat(f.totalTTC || 0) - parseFloat(f.montantPaye || 0)), 0);
 
+  const ldmActives = (ldm || []).filter((l) => l.statut === 'signee' || l.statut === 'envoyee');
+
   if (factures.length === 0) {
-    return <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Aucune facture pour ce client.</div></div>;
+    return (
+      <div>
+        {ldmActives.length > 0 && <PlanFacturation ldm={ldmActives} />}
+        <div className="card" style={{ marginTop: ldmActives.length > 0 ? 20 : 0 }}>
+          <div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>
+            Aucune facture pour ce client.
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
-      {/* KPI row */}
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 20 }}>
         <div className="kpi-card">
           <div className="kpi-icon">💶</div>
@@ -607,7 +1148,12 @@ function TabFacturation({ factures }) {
         </div>
       </div>
 
-      {/* Timeline list */}
+      {ldmActives.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <PlanFacturation ldm={ldmActives} />
+        </div>
+      )}
+
       <div className="card">
         <div className="card-body" style={{ padding: 0 }}>
           <div style={{ position: 'relative', paddingLeft: 32 }}>
@@ -661,14 +1207,744 @@ function TabFacturation({ factures }) {
   );
 }
 
+// ─── PipelineBar ──────────────────────────────────────────────────────────────
+function PipelineBar({ contrat }) {
+  if (!contrat) return null;
+  const currentIdx = PIPELINE_STEPS.findIndex((s) => s.key === contrat.statut);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 14, paddingTop: 4 }}>
+      {PIPELINE_STEPS.map((step, idx) => {
+        const done   = idx < currentIdx;
+        const active = idx === currentIdx;
+        const dotBg  = done ? '#4dd0c4' : active ? '#fff' : 'rgba(255,255,255,0.18)';
+        const txtColor = done ? '#4dd0c4' : active ? '#fff' : 'rgba(255,255,255,0.4)';
+        return (
+          <React.Fragment key={step.key}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 80 }}>
+              <div style={{
+                width: active ? 14 : 10,
+                height: active ? 14 : 10,
+                borderRadius: '50%',
+                background: dotBg,
+                border: active ? '2px solid #4dd0c4' : 'none',
+                marginBottom: 5,
+                transition: 'all 0.2s',
+              }} />
+              <span style={{ fontSize: 10, color: txtColor, fontWeight: active ? 700 : 400, textAlign: 'center', lineHeight: 1.2 }}>
+                {step.label}
+              </span>
+            </div>
+            {idx < PIPELINE_STEPS.length - 1 && (
+              <div style={{
+                flex: 1, height: 2, marginBottom: 16,
+                background: idx < currentIdx ? 'rgba(77,208,196,0.6)' : 'rgba(255,255,255,0.12)',
+              }} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Tab: Contrats pipeline ───────────────────────────────────────────────────
+function TabContrats({ contrats, clientId, currentUser, onReload }) {
+  const canManage = ['expert', 'chef_mission'].includes(currentUser?.role);
+  const [expanded, setExpanded] = useState(null);
+  const [details, setDetails] = useState({});
+  const [activating, setActivating] = useState(null);
+  const [showNewContrat, setShowNewContrat] = useState(false);
+  const [showNewLigne, setShowNewLigne] = useState(null);
+  const [showNewMandat, setShowNewMandat] = useState(null);
+  const [showRevision, setShowRevision] = useState(null);
+  const [showSigner, setShowSigner] = useState(null);
+  const [err, setErr] = useState('');
+
+  const loadDetails = async (id) => {
+    try {
+      const r = await api.get(`/contrats/${id}`);
+      setDetails((prev) => ({ ...prev, [id]: r.data }));
+    } catch { /* ignore */ }
+  };
+
+  const toggle = (id) => {
+    if (expanded === id) { setExpanded(null); return; }
+    setExpanded(id);
+    if (!details[id]) loadDetails(id);
+  };
+
+  const activer = async (id) => {
+    if (!window.confirm('Activer la mission ? Les tâches seront générées automatiquement.')) return;
+    setActivating(id);
+    setErr('');
+    try {
+      const r = await api.post(`/contrats/${id}/activer`);
+      alert(`Mission activée — ${r.data.tachesCreees} tâche(s) générée(s).`);
+      onReload();
+      loadDetails(id);
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de l\'activation');
+    } finally {
+      setActivating(null);
+    }
+  };
+
+  const signerMandat = async (contratId, mandatId, dateSignature) => {
+    try {
+      await api.put(`/contrats/${contratId}/mandats/${mandatId}`, { signe: true, date_signature: dateSignature });
+      loadDetails(contratId);
+    } catch { /* ignore */ }
+  };
+
+  const accepterRevision = async (contratId, revId) => {
+    try {
+      await api.put(`/contrats/${contratId}/revisions/${revId}`, { statut: 'acceptee' });
+      onReload();
+      loadDetails(contratId);
+    } catch (e) {
+      alert(e.response?.data?.message || 'Erreur');
+    }
+  };
+
+  const refuserRevision = async (contratId, revId) => {
+    try {
+      await api.put(`/contrats/${contratId}/revisions/${revId}`, { statut: 'refusee' });
+      loadDetails(contratId);
+    } catch { /* ignore */ }
+  };
+
+  if (contrats.length === 0 && !canManage) {
+    return <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Aucun contrat.</div></div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {canManage && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowNewContrat(true)}>
+            + Nouveau contrat
+          </button>
+        </div>
+      )}
+      {err && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{err}</p>}
+
+      {contrats.length === 0 && (
+        <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 32 }}>Aucun contrat pour ce client.</div></div>
+      )}
+
+      {contrats.map((c) => {
+        const isExpanded = expanded === c.id;
+        const d = details[c.id];
+        const color = PIPELINE_COLOR[c.statut] || '#6b7c93';
+
+        return (
+          <div key={c.id} className="card" style={{ overflow: 'hidden' }}>
+            {/* Header row */}
+            <div
+              className="card-body"
+              style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', paddingBottom: isExpanded ? 12 : undefined }}
+              onClick={() => toggle(c.id)}
+            >
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>
+                    {c.client_nom || c.prospect_nom || '—'}
+                  </span>
+                  <span style={{ background: color, color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 600 }}>
+                    {CONTRAT_STATUT_LABELS[c.statut] || c.statut}
+                  </span>
+                  {c.nb_lignes > 0 && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.nb_lignes} prestation(s)</span>
+                  )}
+                  {c.nb_mandats > 0 && (
+                    <span style={{ fontSize: 11, color: c.nb_mandats_signes === c.nb_mandats ? 'var(--success)' : 'var(--warning)' }}>
+                      {c.nb_mandats_signes}/{c.nb_mandats} mandats signés
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {c.honoraires_ht ? `${fmt(c.honoraires_ht)} HT/an` : 'Honoraires non définis'}
+                  {c.collaborateur_nom && ` · ${c.collaborateur_nom}`}
+                  {c.date_signature && ` · Signé le ${fmtDate(c.date_signature)}`}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                {canManage && c.statut === 'ldm_generee' && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ fontSize: 11 }}
+                    onClick={(e) => { e.stopPropagation(); setShowSigner(c.id); }}
+                  >
+                    ✍️ Signer la LDM
+                  </button>
+                )}
+                {canManage && c.statut === 'ldm_signee' && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ fontSize: 11 }}
+                    disabled={activating === c.id}
+                    onClick={(e) => { e.stopPropagation(); activer(c.id); }}
+                  >
+                    {activating === c.id ? 'Activation…' : '⚡ Activer'}
+                  </button>
+                )}
+                {canManage && c.statut === 'mission_active' && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 11 }}
+                    onClick={(e) => { e.stopPropagation(); setShowRevision(c.id); }}
+                  >
+                    📋 Révision
+                  </button>
+                )}
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{isExpanded ? '▲' : '▼'}</span>
+              </div>
+            </div>
+
+            {/* Expanded details */}
+            {isExpanded && (
+              <div style={{ borderTop: '1px solid var(--border-light)', padding: '16px 20px', background: 'var(--bg)' }}>
+                {!d ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Chargement…</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+                    {/* Pipeline bar mini */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                      {PIPELINE_STEPS.map((step, idx) => {
+                        const curIdx = PIPELINE_STEPS.findIndex((s) => s.key === c.statut);
+                        const done = idx < curIdx;
+                        const active = idx === curIdx;
+                        return (
+                          <React.Fragment key={step.key}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 70 }}>
+                              <div style={{
+                                width: active ? 12 : 8, height: active ? 12 : 8, borderRadius: '50%',
+                                background: done ? 'var(--success)' : active ? color : 'var(--border)',
+                                marginBottom: 4,
+                              }} />
+                              <span style={{ fontSize: 9, color: active ? 'var(--primary)' : done ? 'var(--success)' : 'var(--text-muted)', fontWeight: active ? 700 : 400, textAlign: 'center' }}>
+                                {step.label}
+                              </span>
+                            </div>
+                            {idx < PIPELINE_STEPS.length - 1 && (
+                              <div style={{ flex: 1, height: 1, background: done ? 'var(--success)' : 'var(--border)', marginBottom: 14 }} />
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+
+                    {/* Dates */}
+                    <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
+                      {d.date_devis && <span>Devis : {fmtDate(d.date_devis)}</span>}
+                      {d.date_acceptation && <span>Accepté : {fmtDate(d.date_acceptation)}</span>}
+                      {d.date_signature && <span>Signé : {fmtDate(d.date_signature)}</span>}
+                      {d.date_debut_mission && <span>Début mission : {fmtDate(d.date_debut_mission)}</span>}
+                    </div>
+
+                    {/* Lignes */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>Prestations</span>
+                        {canManage && c.statut !== 'mission_active' && (
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setShowNewLigne(c.id)}>
+                            + Ajouter
+                          </button>
+                        )}
+                      </div>
+                      {d.lignes.length === 0 ? (
+                        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Aucune prestation définie.</p>
+                      ) : (
+                        <div className="table-wrapper">
+                          <table style={{ fontSize: 12 }}>
+                            <thead>
+                              <tr><th>Nom</th><th>Catégorie</th><th>Récurrence</th><th style={{ textAlign: 'right' }}>Budget (min)</th><th style={{ textAlign: 'right' }}>Honoraires HT</th></tr>
+                            </thead>
+                            <tbody>
+                              {d.lignes.map((l) => (
+                                <tr key={l.id}>
+                                  <td style={{ fontWeight: 500 }}>{l.nom}</td>
+                                  <td>{l.categorie || '—'}</td>
+                                  <td>{RECURRENCE_LABEL[l.recurrence] || l.recurrence}</td>
+                                  <td style={{ textAlign: 'right' }}>{l.budget_minutes} min</td>
+                                  <td style={{ textAlign: 'right' }}>{fmt(l.honoraires_ht)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Mandats */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>Mandats</span>
+                        {canManage && (
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setShowNewMandat(c.id)}>
+                            + Ajouter
+                          </button>
+                        )}
+                      </div>
+                      {d.mandats.length === 0 ? (
+                        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Aucun mandat.</p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {d.mandats.map((m) => (
+                            <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border-light)' }}>
+                              <span style={{ flex: 1 }}>{MANDAT_TYPE_LABEL[m.type] || m.type}{m.libelle ? ` — ${m.libelle}` : ''}</span>
+                              {m.signe ? (
+                                <span className="badge badge-termine">Signé {fmtDate(m.date_signature)}</span>
+                              ) : canManage ? (
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ fontSize: 10 }}
+                                  onClick={() => {
+                                    const date = prompt('Date de signature (AAAA-MM-JJ) :', new Date().toISOString().split('T')[0]);
+                                    if (date) signerMandat(c.id, m.id, date);
+                                  }}
+                                >
+                                  ✍️ Signer
+                                </button>
+                              ) : (
+                                <span className="badge badge-reporte">Non signé</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Révisions */}
+                    {d.revisions.length > 0 && (
+                      <div>
+                        <span style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 8 }}>Révisions annuelles</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {d.revisions.map((r) => (
+                            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border-light)' }}>
+                              <span style={{ fontWeight: 600, minWidth: 40 }}>{r.annee}</span>
+                              <span style={{ flex: 1 }}>
+                                {fmt(r.anciens_honoraires)} → {fmt(r.nouveaux_honoraires)}
+                                {r.motif && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{r.motif}</span>}
+                              </span>
+                              <span className={`badge badge-${REVISION_STATUT[r.statut]?.badge || 'autre'}`}>
+                                {REVISION_STATUT[r.statut]?.label || r.statut}
+                              </span>
+                              {r.statut === 'proposee' && canManage && (
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <button className="btn btn-primary btn-sm" style={{ fontSize: 10, padding: '2px 8px' }}
+                                    onClick={() => accepterRevision(c.id, r.id)}>✓ Accepter</button>
+                                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '2px 8px' }}
+                                    onClick={() => refuserRevision(c.id, r.id)}>✗ Refuser</button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Modal nouveau contrat */}
+      {showNewContrat && (
+        <NouveauContratModal
+          clientId={clientId}
+          onSave={() => { setShowNewContrat(false); onReload(); }}
+          onClose={() => setShowNewContrat(false)}
+        />
+      )}
+
+      {/* Modal nouvelle ligne */}
+      {showNewLigne && (
+        <NouvelleLigneModal
+          contratId={showNewLigne}
+          onSave={() => { setShowNewLigne(null); loadDetails(showNewLigne); }}
+          onClose={() => setShowNewLigne(null)}
+        />
+      )}
+
+      {/* Modal nouveau mandat */}
+      {showNewMandat && (
+        <NouveauMandatModal
+          contratId={showNewMandat}
+          onSave={() => { setShowNewMandat(null); loadDetails(showNewMandat); }}
+          onClose={() => setShowNewMandat(null)}
+        />
+      )}
+
+      {/* Modal révision */}
+      {showRevision && (
+        <RevisionModal
+          contratId={showRevision}
+          contrat={contrats.find((c) => c.id === showRevision)}
+          onSave={() => { setShowRevision(null); loadDetails(showRevision); onReload(); }}
+          onClose={() => setShowRevision(null)}
+        />
+      )}
+
+      {/* Modal signature LDM */}
+      {showSigner && (
+        <SignerLdmModal
+          contratId={showSigner}
+          contrat={contrats.find((c) => c.id === showSigner)}
+          onSave={(msg) => { setShowSigner(null); alert(msg); onReload(); }}
+          onClose={() => setShowSigner(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Modals pour TabContrats ──────────────────────────────────────────────────
+
+function NouveauContratModal({ clientId, onSave, onClose }) {
+  const [form, setForm] = useState({ statut: 'prospect', honoraires_ht: '', date_devis: '', collaborateur_id: '' });
+  const [users, setUsers] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    api.get('/utilisateurs').then((r) => setUsers(r.data)).catch(() => {});
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      await api.post('/contrats', {
+        client_id: clientId,
+        statut: form.statut,
+        honoraires_ht: form.honoraires_ht ? parseFloat(form.honoraires_ht) : null,
+        date_devis: form.date_devis || null,
+        collaborateur_id: form.collaborateur_id || null,
+      });
+      onSave();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la création');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Nouveau contrat" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label className="form-label">Statut initial</label>
+          <select className="form-control" value={form.statut} onChange={set('statut')}>
+            {PIPELINE_STEPS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Honoraires HT (€/an)</label>
+            <input className="form-control" type="number" step="0.01" value={form.honoraires_ht} onChange={set('honoraires_ht')} placeholder="0.00" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Date devis</label>
+            <input className="form-control" type="date" value={form.date_devis} onChange={set('date_devis')} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Collaborateur responsable</label>
+          <select className="form-control" value={form.collaborateur_id} onChange={set('collaborateur_id')}>
+            <option value="">— Choisir —</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.prenom} {u.nom}</option>)}
+          </select>
+        </div>
+        {err && <p className="form-error">{err}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Création…' : 'Créer'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function NouvelleLigneModal({ contratId, onSave, onClose }) {
+  const [form, setForm] = useState({ nom: '', categorie: '', budget_minutes: '', recurrence: 'none', honoraires_ht: '' });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      await api.post(`/contrats/${contratId}/lignes`, {
+        nom: form.nom,
+        categorie: form.categorie || null,
+        budget_minutes: form.budget_minutes ? parseInt(form.budget_minutes, 10) : 0,
+        recurrence: form.recurrence,
+        honoraires_ht: form.honoraires_ht ? parseFloat(form.honoraires_ht) : 0,
+      });
+      onSave();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Ajouter une prestation" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label className="form-label">Nom *</label>
+          <input className="form-control" value={form.nom} onChange={set('nom')} required placeholder="Ex : Tenue comptable" />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Catégorie</label>
+            <select className="form-control" value={form.categorie} onChange={set('categorie')}>
+              <option value="">— Choisir —</option>
+              {['Fiscal','Social','Juridique','Comptabilité','Admin','Client'].map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Récurrence</label>
+            <select className="form-control" value={form.recurrence} onChange={set('recurrence')}>
+              {Object.entries(RECURRENCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Budget (minutes)</label>
+            <input className="form-control" type="number" min="0" value={form.budget_minutes} onChange={set('budget_minutes')} placeholder="0" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Honoraires HT (€/an)</label>
+            <input className="form-control" type="number" step="0.01" value={form.honoraires_ht} onChange={set('honoraires_ht')} placeholder="0.00" />
+          </div>
+        </div>
+        {err && <p className="form-error">{err}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Ajout…' : 'Ajouter'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function NouveauMandatModal({ contratId, onSave, onClose }) {
+  const [form, setForm] = useState({ type: 'prelevement', libelle: '' });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.post(`/contrats/${contratId}/mandats`, { type: form.type, libelle: form.libelle || null });
+      onSave();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Ajouter un mandat" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label className="form-label">Type *</label>
+          <select className="form-control" value={form.type} onChange={set('type')}>
+            {Object.entries(MANDAT_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Libellé</label>
+          <input className="form-control" value={form.libelle} onChange={set('libelle')} placeholder="Précisions optionnelles" />
+        </div>
+        {err && <p className="form-error">{err}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Ajout…' : 'Ajouter'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function SignerLdmModal({ contratId, contrat, onSave, onClose }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState({
+    date_signature: today,
+    date_debut_mission: today,
+    collaborateur_id: contrat?.collaborateur_id || '',
+  });
+  const [users, setUsers] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    api.get('/utilisateurs').then((r) => setUsers(r.data)).catch(() => {});
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      const r = await api.post(`/contrats/${contratId}/signer`, {
+        date_signature: form.date_signature,
+        date_debut_mission: form.date_debut_mission || null,
+        collaborateur_id: form.collaborateur_id || null,
+      });
+      onSave(r.data.message);
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la signature');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="✍️ Enregistrer la signature LDM" onClose={onClose} maxWidth={480}>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+        La signature de la LDM déclenche automatiquement la génération des tâches planifiées
+        pour le collaborateur désigné.
+      </p>
+      <form onSubmit={handleSubmit}>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Date de signature *</label>
+            <input className="form-control" type="date" value={form.date_signature} onChange={set('date_signature')} required />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Début de mission *</label>
+            <input className="form-control" type="date" value={form.date_debut_mission} onChange={set('date_debut_mission')} required />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Collaborateur responsable</label>
+          <select className="form-control" value={form.collaborateur_id} onChange={set('collaborateur_id')}>
+            <option value="">— Choisir —</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>{u.prenom} {u.nom}</option>
+            ))}
+          </select>
+        </div>
+        {contrat?.honoraires_ht && (
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 14px', marginBottom: 14, fontSize: 13 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Honoraires annuels HT : </span>
+            <strong>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(contrat.honoraires_ht)}</strong>
+          </div>
+        )}
+        {err && <p className="form-error">{err}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
+            {saving ? 'Signature en cours…' : '✍️ Signer et générer les tâches'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function RevisionModal({ contratId, contrat, onSave, onClose }) {
+  const annee = new Date().getFullYear();
+  const [form, setForm] = useState({
+    annee: String(annee),
+    anciens_honoraires: contrat?.honoraires_ht || '',
+    nouveaux_honoraires: '',
+    motif: '',
+    date_revision: new Date().toISOString().split('T')[0],
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      await api.post(`/contrats/${contratId}/revisions`, {
+        annee: parseInt(form.annee, 10),
+        anciens_honoraires: form.anciens_honoraires ? parseFloat(form.anciens_honoraires) : null,
+        nouveaux_honoraires: parseFloat(form.nouveaux_honoraires),
+        motif: form.motif || null,
+        date_revision: form.date_revision,
+      });
+      onSave();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Proposer une révision annuelle" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Année *</label>
+            <input className="form-control" type="number" value={form.annee} onChange={set('annee')} required />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Date de révision</label>
+            <input className="form-control" type="date" value={form.date_revision} onChange={set('date_revision')} />
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Anciens honoraires HT (€)</label>
+            <input className="form-control" type="number" step="0.01" value={form.anciens_honoraires} onChange={set('anciens_honoraires')} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Nouveaux honoraires HT (€) *</label>
+            <input className="form-control" type="number" step="0.01" value={form.nouveaux_honoraires} onChange={set('nouveaux_honoraires')} required />
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Motif</label>
+          <textarea className="form-control" value={form.motif} onChange={set('motif')} rows={2} placeholder="Indexation, avenant, …" />
+        </div>
+        {err && <p className="form-error">{err}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Enregistrement…' : 'Proposer'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ─── Tab: Devis & LDM ────────────────────────────────────────────────────────
-function TabDevisLdm({ devis, ldm }) {
+function TabDevisLdm({ devis, ldm, clientId }) {
+  const navigate = useNavigate();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Devis */}
       <div className="card">
-        <div className="card-header">
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span className="card-title">Devis ({devis.length})</span>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => navigate(`/devis/nouveau?client_id=${clientId}`)}
+          >
+            + Nouveau devis
+          </button>
         </div>
         <div className="card-body" style={{ paddingTop: 0 }}>
           {devis.length === 0 ? (
@@ -678,11 +1954,7 @@ function TabDevisLdm({ devis, ldm }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Numéro</th>
-                    <th>Titre</th>
-                    <th>Statut</th>
-                    <th>Émis le</th>
-                    <th>Validité</th>
+                    <th>Numéro</th><th>Titre</th><th>Statut</th><th>Émis le</th><th>Validité</th>
                     <th style={{ textAlign: 'right' }}>Total HT</th>
                   </tr>
                 </thead>
@@ -704,10 +1976,15 @@ function TabDevisLdm({ devis, ldm }) {
         </div>
       </div>
 
-      {/* Lettres de mission */}
       <div className="card">
-        <div className="card-header">
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span className="card-title">Lettres de mission ({ldm.length})</span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate(`/lettres-mission/nouveau?client_id=${clientId}`)}
+          >
+            + Nouvelle LDM
+          </button>
         </div>
         <div className="card-body" style={{ paddingTop: 0 }}>
           {ldm.length === 0 ? (
@@ -717,11 +1994,7 @@ function TabDevisLdm({ devis, ldm }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Numéro</th>
-                    <th>Type de mission</th>
-                    <th>Statut</th>
-                    <th>Début</th>
-                    <th>Fin</th>
+                    <th>Numéro</th><th>Type de mission</th><th>Statut</th><th>Début</th><th>Fin</th>
                     <th style={{ textAlign: 'right' }}>Honoraires HT</th>
                   </tr>
                 </thead>
@@ -755,16 +2028,8 @@ function TabNotes({ client, clientId, currentUser, onSaved }) {
   const [err, setErr] = useState('');
   const [showHelp, setShowHelp] = useState(false);
 
-  const startEdit = () => {
-    setEditedText(client.notes_riches || '');
-    setEditing(true);
-    setErr('');
-  };
-
-  const cancelEdit = () => {
-    setEditing(false);
-    setErr('');
-  };
+  const startEdit = () => { setEditedText(client.notes_riches || ''); setEditing(true); setErr(''); };
+  const cancelEdit = () => { setEditing(false); setErr(''); };
 
   const save = async () => {
     setSaving(true);
@@ -789,11 +2054,7 @@ function TabNotes({ client, clientId, currentUser, onSaved }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {!editing && (
             <div style={{ position: 'relative' }}>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => setShowHelp(v => !v)}
-                title="Aide Markdown"
-              >
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowHelp(v => !v)} title="Aide Markdown">
                 ? Markdown
               </button>
               {showHelp && (
@@ -859,10 +2120,7 @@ function TabNotes({ client, clientId, currentUser, onSaved }) {
         ) : hasContent ? (
           <div
             dangerouslySetInnerHTML={{ __html: marked(client.notes_riches || '') }}
-            style={{
-              padding: '8px 4px', lineHeight: 1.8, fontSize: 14, color: 'var(--text)',
-              maxWidth: '100%', overflowWrap: 'break-word',
-            }}
+            style={{ padding: '8px 4px', lineHeight: 1.8, fontSize: 14, color: 'var(--text)', maxWidth: '100%', overflowWrap: 'break-word' }}
             className="notes-prose"
           />
         ) : (
@@ -870,9 +2128,7 @@ function TabNotes({ client, clientId, currentUser, onSaved }) {
             <div style={{ fontSize: 32, marginBottom: 12 }}>📝</div>
             <p style={{ marginBottom: 12 }}>Aucune note pour ce client.</p>
             {canEdit && (
-              <button className="btn btn-primary btn-sm" onClick={startEdit}>
-                Cliquez Éditer pour commencer
-              </button>
+              <button className="btn btn-primary btn-sm" onClick={startEdit}>Cliquez Éditer pour commencer</button>
             )}
           </div>
         )}
@@ -900,11 +2156,7 @@ function TabContacts({ contacts }) {
           <table>
             <thead>
               <tr>
-                <th>Nom</th>
-                <th>Poste</th>
-                <th>Email</th>
-                <th>Téléphone</th>
-                <th>Principal</th>
+                <th>Nom</th><th>Poste</th><th>Email</th><th>Téléphone</th><th>Principal</th>
               </tr>
             </thead>
             <tbody>
@@ -916,13 +2168,15 @@ function TabContacts({ contacts }) {
                   </td>
                   <td>{c.poste || '—'}</td>
                   <td>
-                    {c.email ? (
-                      <a href={`mailto:${c.email}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.email}</a>
-                    ) : '—'}
+                    {c.email
+                      ? <a href={`mailto:${c.email}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.email}</a>
+                      : '—'}
                   </td>
                   <td>{c.telephone || c.mobile || '—'}</td>
                   <td>
-                    {c.principal ? <span className="badge badge-actif">Principal</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                    {c.principal
+                      ? <span className="badge badge-actif">Principal</span>
+                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
                 </tr>
               ))}
@@ -953,17 +2207,19 @@ export default function ClientCockpit() {
   const [factures, setFactures] = useState([]);
   const [devis, setDevis] = useState([]);
   const [ldm, setLdm] = useState([]);
+  const [contrats, setContrats] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [users, setUsers] = useState([]);
+
+  // Quick action modals
+  const [showNewTache, setShowNewTache] = useState(false);
+  const [showNewInteraction, setShowNewInteraction] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [
-        clientRes, attrRes, intRes, missRes, tachRes,
-        factRes, devisRes, ldmRes,
-      ] = await Promise.all([
+      const [clientRes, attrRes, intRes, missRes, tachRes, factRes, devisRes, ldmRes, contratsRes] = await Promise.all([
         api.get(`/clients/${clientId}`),
         api.get(`/attributions?client_id=${clientId}`),
         api.get(`/interactions?client_id=${clientId}&limit=100`),
@@ -972,6 +2228,7 @@ export default function ClientCockpit() {
         api.get(`/factures?client_id=${clientId}`),
         api.get(`/devis?client_id=${clientId}`),
         api.get(`/lettres-mission?client_id=${clientId}`),
+        api.get(`/contrats?client_id=${clientId}`),
       ]);
 
       setClient(clientRes.data);
@@ -982,18 +2239,15 @@ export default function ClientCockpit() {
       setFactures(factRes.data);
       setDevis(devisRes.data);
       setLdm(ldmRes.data);
+      setContrats(contratsRes.data);
 
-      // Personnes contact via clients/:id (returns attributions inline)
-      // We fetch contacts separately via contacts endpoint filtered by client
       try {
         const pcRes = await api.get(`/contacts/personnes?client_id=${clientId}`);
         setContacts(pcRes.data);
       } catch {
-        // Try direct query approach — the personnes_contact table uses client_id
         setContacts([]);
       }
 
-      // Load users for tache modal
       if (['expert', 'chef_mission'].includes(user?.role)) {
         const usersRes = await api.get('/utilisateurs');
         setUsers(usersRes.data);
@@ -1001,17 +2255,28 @@ export default function ClientCockpit() {
         setUsers(user ? [user] : []);
       }
     } catch (e) {
-      if (e.response?.status === 404) {
-        setError('Client introuvable.');
-      } else {
-        setError('Erreur lors du chargement du client.');
-      }
+      setError(e.response?.status === 404 ? 'Client introuvable.' : 'Erreur lors du chargement du client.');
     } finally {
       setLoading(false);
     }
   }, [clientId, user]);
 
   useEffect(() => { load(); }, [load]);
+
+  const reloadTaches = useCallback(async () => {
+    const r = await api.get(`/taches?client_id=${clientId}`);
+    setTaches(r.data);
+  }, [clientId]);
+
+  const reloadInteractions = useCallback(async () => {
+    const r = await api.get(`/interactions?client_id=${clientId}&limit=100`);
+    setInteractions(r.data);
+  }, [clientId]);
+
+  const reloadAttributions = useCallback(async () => {
+    const r = await api.get(`/attributions?client_id=${clientId}`);
+    setAttributions(r.data);
+  }, [clientId]);
 
   if (loading) {
     return (
@@ -1038,54 +2303,121 @@ export default function ClientCockpit() {
     );
   }
 
+  const responsable = attributions.find((a) => a.role_sur_dossier === 'responsable');
+  const displayName = client.nom;
+
   return (
     <div className="page-body" style={{ padding: 0 }}>
-      {/* ── Client header ────────────────────────────────────────────────── */}
-      <div style={{
-        background: 'linear-gradient(135deg, #0F1F4B 0%, #0a1835 100%)',
-        padding: '24px 28px 0',
-        color: '#fff',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div>
+      {/* ── Client header ──────────────────────────────────────────────────── */}
+      <div style={{ background: 'linear-gradient(135deg, #0F1F4B 0%, #0a1835 100%)', padding: '20px 28px 0', color: '#fff' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <button
               onClick={() => navigate('/clients')}
-              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px 10px', borderRadius: 4, fontSize: 12, marginBottom: 12 }}
+              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px 10px', borderRadius: 4, fontSize: 12, marginBottom: 10 }}
             >
               ← Clients
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>{client.nom}</h1>
+
+            {/* Title row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+              <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.2 }}>
+                {displayName}
+              </h1>
+              {client.forme_juridique && (
+                <span style={{ background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.9)', padding: '3px 9px', borderRadius: 4, fontSize: 12 }}>
+                  {client.forme_juridique}
+                </span>
+              )}
               <span style={{
                 background: TYPE_BADGE[client.type] === 'bic' ? '#00B4D8' :
                   TYPE_BADGE[client.type] === 'bnc' ? '#7c3aed' :
                   TYPE_BADGE[client.type] === 'sci' ? '#d97706' :
-                  TYPE_BADGE[client.type] === 'sa' ? '#059669' : '#475569',
-                color: '#fff', padding: '3px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700,
+                  TYPE_BADGE[client.type] === 'sa' ? '#059669' : 'rgba(255,255,255,0.15)',
+                color: '#fff', padding: '3px 9px', borderRadius: 4, fontSize: 12, fontWeight: 700,
               }}>
                 {client.type}
               </span>
               <span style={{
-                background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.85)',
-                padding: '3px 10px', borderRadius: 4, fontSize: 12,
-              }}>
-                {REGIME_LABEL[client.regime] || client.regime}
-              </span>
-              <span style={{
-                background: client.actif ? 'rgba(0,137,123,0.3)' : 'rgba(214,48,49,0.3)',
+                background: client.actif ? 'rgba(0,180,116,0.25)' : 'rgba(214,48,49,0.25)',
                 color: client.actif ? '#4dd0c4' : '#ff8a80',
-                padding: '3px 10px', borderRadius: 4, fontSize: 12, fontWeight: 600,
+                padding: '3px 9px', borderRadius: 4, fontSize: 12, fontWeight: 600,
               }}>
-                {client.actif ? 'Actif' : 'Inactif'}
+                {client.actif ? '● Actif' : '● Inactif'}
               </span>
+              {client.complexite && (
+                <span style={{
+                  background: { simple: 'rgba(34,197,94,0.2)', standard: 'rgba(59,130,246,0.2)', complexe: 'rgba(245,158,11,0.2)', expert: 'rgba(239,68,68,0.2)' }[client.complexite] || 'rgba(255,255,255,0.1)',
+                  color: { simple: '#4ade80', standard: '#60a5fa', complexe: '#fbbf24', expert: '#f87171' }[client.complexite] || 'rgba(255,255,255,0.7)',
+                  padding: '3px 9px', borderRadius: 4, fontSize: 12, fontWeight: 600,
+                }}>
+                  {({ simple: 'Simple ×0.8', standard: 'Standard ×1.0', complexe: 'Complexe ×1.3', expert: 'Expert ×1.6' })[client.complexite]}
+                </span>
+              )}
             </div>
-            {client.siren && (
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginTop: 6 }}>
-                SIREN : {client.siren}
-              </div>
-            )}
+
+            {/* Sub-info row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>
+              {client.raison_sociale && (
+                <span title="Dirigeant">{client.raison_sociale}</span>
+              )}
+              {client.siren && <span>SIREN {client.siren}</span>}
+              {client.siret && !client.siren && <span>SIRET {client.siret}</span>}
+              {client.ville && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  📍 {client.ville}
+                </span>
+              )}
+              {client.groupe && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  🏢 {client.groupe}
+                </span>
+              )}
+              {responsable && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  👤 {responsable.prenom} {responsable.nom}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Quick action buttons */}
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', marginTop: 28 }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: 'rgba(255,255,255,0.8)', borderColor: 'rgba(255,255,255,0.2)', fontSize: 12 }}
+              onClick={() => { setTab('timeline'); setShowNewInteraction(true); }}
+            >
+              💬 Interaction
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: 'rgba(255,255,255,0.8)', borderColor: 'rgba(255,255,255,0.2)', fontSize: 12 }}
+              onClick={() => setShowNewTache(true)}
+            >
+              ✅ Tâche
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: 'rgba(255,255,255,0.8)', borderColor: 'rgba(255,255,255,0.2)', fontSize: 12 }}
+              onClick={() => setTab('documents')}
+            >
+              📁 Document
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ fontSize: 12 }}
+              onClick={() => navigate(`/devis/nouveau?client_id=${clientId}`)}
+            >
+              📄 Devis
+            </button>
           </div>
         </div>
+
+        {/* ── Pipeline bar ─────────────────────────────────────────────────── */}
+        {contrats.length > 0 && (
+          <PipelineBar contrat={contrats[0]} />
+        )}
 
         {/* ── Tab bar ──────────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', gap: 2, overflowX: 'auto' }}>
@@ -1096,14 +2428,16 @@ export default function ClientCockpit() {
               style={{
                 background: tab === t.key ? '#fff' : 'transparent',
                 color: tab === t.key ? 'var(--primary)' : 'rgba(255,255,255,0.65)',
-                border: 'none', cursor: 'pointer', padding: '10px 18px', fontSize: 13, fontWeight: tab === t.key ? 700 : 500,
+                border: 'none', cursor: 'pointer', padding: '10px 16px', fontSize: 13,
+                fontWeight: tab === t.key ? 700 : 500,
                 borderRadius: '6px 6px 0 0', whiteSpace: 'nowrap', transition: 'all 0.15s',
               }}
             >
               {t.label}
               {t.key === 'taches' && taches.filter((t2) => t2.statut !== 'termine').length > 0 && (
                 <span style={{
-                  marginLeft: 6, background: tab === t.key ? 'var(--primary)' : 'rgba(255,255,255,0.3)',
+                  marginLeft: 6,
+                  background: tab === t.key ? 'var(--primary)' : 'rgba(255,255,255,0.3)',
                   color: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: 10, fontWeight: 700,
                 }}>
                   {taches.filter((t2) => t2.statut !== 'termine').length}
@@ -1124,6 +2458,18 @@ export default function ClientCockpit() {
             taches={taches}
             missions={missions}
             clientId={clientId}
+            currentUser={user}
+            onClientSaved={() => api.get(`/clients/${clientId}`).then((r) => setClient(r.data))}
+          />
+        )}
+
+        {tab === 'equipe' && (
+          <TabEquipe
+            attributions={attributions}
+            clientId={clientId}
+            currentUser={user}
+            onReload={reloadAttributions}
+            allUsers={users}
           />
         )}
 
@@ -1133,15 +2479,24 @@ export default function ClientCockpit() {
             clientId={clientId}
             users={users}
             currentUser={user}
-            onTacheCreated={() => api.get(`/taches?client_id=${clientId}`).then((r) => setTaches(r.data))}
+            onTacheCreated={reloadTaches}
+            onInteractionCreated={reloadInteractions}
           />
         )}
 
-        {tab === 'travaux' && <TabTravaux missions={missions} />}
+        {tab === 'travaux' && <TabTravaux missions={missions} taches={taches} />}
 
-        {tab === 'taches' && <TabTaches taches={taches} clientId={clientId} />}
+        {tab === 'taches' && (
+          <TabTaches
+            taches={taches}
+            clientId={clientId}
+            users={users}
+            currentUser={user}
+            onTacheCreated={reloadTaches}
+          />
+        )}
 
-        {tab === 'facturation' && <TabFacturation factures={factures} />}
+        {tab === 'facturation' && <TabFacturation factures={factures} ldm={ldm} />}
 
         {tab === 'documents' && (
           <div className="card">
@@ -1160,10 +2515,39 @@ export default function ClientCockpit() {
           />
         )}
 
-        {tab === 'devis' && <TabDevisLdm devis={devis} ldm={ldm} />}
+        {tab === 'contrats' && (
+          <TabContrats
+            contrats={contrats}
+            clientId={clientId}
+            currentUser={user}
+            onReload={load}
+          />
+        )}
+
+        {tab === 'devis' && <TabDevisLdm devis={devis} ldm={ldm} clientId={clientId} />}
 
         {tab === 'contacts' && <TabContacts contacts={contacts} />}
       </div>
+
+      {/* ── Global quick-action modals ────────────────────────────────────── */}
+      {showNewTache && (
+        <TacheModal
+          clientId={clientId}
+          interactionObjet=""
+          users={users}
+          currentUser={user}
+          onSave={() => { setShowNewTache(false); reloadTaches(); }}
+          onClose={() => setShowNewTache(false)}
+        />
+      )}
+
+      {showNewInteraction && (
+        <InteractionModal
+          clientId={clientId}
+          onSave={() => { setShowNewInteraction(false); reloadInteractions(); }}
+          onClose={() => setShowNewInteraction(false)}
+        />
+      )}
     </div>
   );
 }

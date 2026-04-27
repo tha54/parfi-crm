@@ -17,8 +17,8 @@ router.get('/kpis', verifyToken, async (req, res) => {
 
     // ── Chiffre d'affaires ────────────────────────────────────────────────────
     const [[{ caFacture }]] = await pool.query(
-      `SELECT COALESCE(SUM(montantHT),0) AS caFacture FROM factures
-       WHERE statut IN ('envoyee','payee') AND YEAR(dateFacture) = YEAR(NOW())`
+      `SELECT COALESCE(SUM(totalHT),0) AS caFacture FROM factures
+       WHERE statut IN ('envoyee','payee') AND YEAR(dateEmission) = YEAR(NOW())`
     );
     const [[{ caPrevisionnel }]] = await pool.query(
       `SELECT COALESCE(SUM(montantHonorairesHT),0) AS caPrevisionnel FROM lettres_mission
@@ -30,8 +30,8 @@ router.get('/kpis', verifyToken, async (req, res) => {
       "SELECT COUNT(*) AS devisEnAttente FROM devis WHERE statut = 'envoye'"
     );
     const [[{ impayesMontant }]] = await pool.query(
-      `SELECT COALESCE(SUM(montantTTC),0) AS impayesMontant FROM factures
-       WHERE statut = 'envoyee' AND dateEcheance < CURDATE()`
+      `SELECT COALESCE(SUM(totalTTC),0) AS impayesMontant FROM factures
+       WHERE statut IN ('envoyee','retard') AND dateEcheance < CURDATE()`
     );
     const [[{ impayesCount }]] = await pool.query(
       `SELECT COUNT(*) AS impayesCount FROM factures

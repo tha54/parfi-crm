@@ -31,6 +31,8 @@ import Wiki from './pages/Wiki';
 import Automations from './pages/Automations';
 import TiimeImport from './pages/TiimeImport';
 import ClientIntake from './pages/ClientIntake';
+import Absences from './pages/Absences';
+import Rapports from './pages/Rapports';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -87,6 +89,8 @@ function AppRoutes() {
       <Route path="/wiki" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Wiki /></AppLayout></ProtectedRoute>} />
       <Route path="/automations" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Automations /></AppLayout></ProtectedRoute>} />
       <Route path="/tiime-import" element={<ProtectedRoute roles={['expert']}><AppLayout><TiimeImport /></AppLayout></ProtectedRoute>} />
+      <Route path="/absences" element={<ProtectedRoute><AppLayout><Absences /></AppLayout></ProtectedRoute>} />
+      <Route path="/rapports" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Rapports /></AppLayout></ProtectedRoute>} />
       <Route path="/intake" element={<ClientIntake />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

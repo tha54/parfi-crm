@@ -3,6 +3,57 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
+// Parse "Prénom|Nom|role,Prénom|Nom|role,…" into avatar objects
+function parseEquipe(str) {
+  if (!str) return [];
+  return str.split(',').map(part => {
+    const [prenom, nom, role] = part.split('|');
+    const initials = `${(prenom || '')[0] || ''}${(nom || '')[0] || ''}`.toUpperCase();
+    return { prenom: prenom || '', nom: nom || '', role: role || 'assistant', initials };
+  });
+}
+
+function EquipeAvatars({ equipe }) {
+  const MAX_SHOWN = 4;
+  const shown = equipe.slice(0, MAX_SHOWN);
+  const rest = equipe.length - MAX_SHOWN;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+      {shown.map((m, i) => (
+        <div
+          key={i}
+          title={`${m.prenom} ${m.nom} (${m.role === 'responsable' ? 'Responsable' : 'Assistant'})`}
+          style={{
+            width: 28, height: 28, borderRadius: '50%',
+            background: m.role === 'responsable' ? '#0F1F4B' : '#5BB8E8',
+            color: '#fff', fontSize: 10, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0, border: '2px solid #fff',
+            marginLeft: i > 0 ? -6 : 0,
+            cursor: 'default',
+          }}
+        >
+          {m.initials}
+        </div>
+      ))}
+      {rest > 0 && (
+        <div
+          title={`+${rest} autre${rest > 1 ? 's' : ''}`}
+          style={{
+            width: 28, height: 28, borderRadius: '50%',
+            background: '#e2e8f0', color: '#64748b',
+            fontSize: 10, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            marginLeft: -6, border: '2px solid #fff', cursor: 'default',
+          }}
+        >
+          +{rest}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TYPES = ['BIC', 'BNC', 'SCI', 'SA', 'Association', 'Autre'];
 const REGIMES = ['mensuel', 'trimestriel', 'annuel'];
 const regimeLabel = { mensuel: 'Mensuel', trimestriel: 'Trimestriel', annuel: 'Annuel' };
@@ -233,6 +284,8 @@ export default function Clients() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterRegime, setFilterRegime] = useState('');
+  const [filterGroupe, setFilterGroupe] = useState('');
+  const [filterVille, setFilterVille] = useState('');
 
   const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
 
@@ -254,36 +307,92 @@ export default function Clients() {
     load();
   };
 
+  // Derive unique groupe options from data
+  const groupes = [...new Set(clients.map(c => c.groupe).filter(Boolean))].sort();
+
   const filtered = clients.filter(c => {
-    const matchSearch = `${c.nom} ${c.siren || ''}`.toLowerCase().includes(search.toLowerCase());
+    const q = search.toLowerCase();
+    const matchSearch = !q || [c.nom, c.siren, c.raison_sociale, c.ville, c.groupe, c.equipe]
+      .some(v => (v || '').toLowerCase().includes(q));
     const matchType = filterType ? c.type === filterType : true;
-    const matchRegime = filterRegime ? c.regime === filterRegime : true;
-    return matchSearch && matchType && matchRegime;
+    const matchRegime = filterRegime ? (c.regime === filterRegime || c.regime_tva === filterRegime) : true;
+    const matchGroupe = filterGroupe ? c.groupe === filterGroupe : true;
+    const matchVille = filterVille
+      ? (c.ville || '').toLowerCase().includes(filterVille.toLowerCase())
+      : true;
+    return matchSearch && matchType && matchRegime && matchGroupe && matchVille;
   });
+
+  // Stats breakdown by groupe
+  const groupeStats = groupes.map(g => ({
+    groupe: g,
+    count: filtered.filter(c => c.groupe === g).length,
+  })).filter(g => g.count > 0);
 
   return (
     <>
       <div className="page-header">
-        <h1>Clients</h1>
+        <div>
+          <h1>Clients</h1>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>
+            <span>{filtered.length} client{filtered.length !== 1 ? 's' : ''}</span>
+            {groupeStats.map(g => (
+              <span key={g.groupe} style={{ color: 'var(--accent)' }}>
+                {g.groupe} : {g.count}
+              </span>
+            ))}
+          </div>
+        </div>
         {isExpertOrChef && (
           <button className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>+ Nouveau client</button>
         )}
       </div>
       <div className="page-body">
         <div className="card">
-          <div className="card-header">
-            <div className="filters-bar">
-              <input className="form-control search-input" placeholder="Rechercher par nom, SIREN..." value={search} onChange={e => setSearch(e.target.value)} />
-              <select className="form-control" style={{ width: 'auto' }} value={filterType} onChange={e => setFilterType(e.target.value)}>
+          <div className="card-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+            <div className="filters-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <input
+                className="form-control search-input"
+                placeholder="Rechercher par nom, SIREN, dirigeant, ville, groupe…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{ minWidth: 220, flex: '2 1 220px' }}
+              />
+              <select
+                className="form-control"
+                style={{ width: 'auto', flex: '1 1 130px' }}
+                value={filterGroupe}
+                onChange={e => setFilterGroupe(e.target.value)}
+              >
+                <option value="">Tous les groupes</option>
+                {groupes.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+              <input
+                className="form-control"
+                placeholder="Ville…"
+                value={filterVille}
+                onChange={e => setFilterVille(e.target.value)}
+                style={{ width: 'auto', flex: '1 1 110px' }}
+              />
+              <select
+                className="form-control"
+                style={{ width: 'auto', flex: '1 1 120px' }}
+                value={filterType}
+                onChange={e => setFilterType(e.target.value)}
+              >
                 <option value="">Tous les types</option>
                 {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
-              <select className="form-control" style={{ width: 'auto' }} value={filterRegime} onChange={e => setFilterRegime(e.target.value)}>
+              <select
+                className="form-control"
+                style={{ width: 'auto', flex: '1 1 130px' }}
+                value={filterRegime}
+                onChange={e => setFilterRegime(e.target.value)}
+              >
                 <option value="">Tous les régimes</option>
                 {REGIMES.map(r => <option key={r} value={r}>{regimeLabel[r]}</option>)}
               </select>
             </div>
-            <span className="text-muted text-sm">{filtered.length} client(s)</span>
           </div>
           <div className="table-wrapper">
             {loading ? (
@@ -294,25 +403,60 @@ export default function Clients() {
               <table>
                 <thead>
                   <tr>
-                    <th>Nom</th>
+                    <th>Dossier</th>
+                    <th>Dirigeant</th>
+                    <th>Forme juridique</th>
+                    <th>Groupe</th>
+                    <th>Ville</th>
                     <th>SIREN</th>
-                    <th>Type</th>
-                    <th>Régime TVA</th>
-                    {isExpertOrChef && <th>Collaborateurs</th>}
-                    <th>Ajouté le</th>
+                    <th>Régime</th>
+                    {isExpertOrChef && <th>Équipe</th>}
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(c => (
-                    <tr key={c.id}>
-                      <td><strong style={{ cursor: 'pointer', color: 'var(--primary)' }} onClick={() => navigate(`/clients/${c.id}`)}>{c.nom}</strong></td>
-                      <td><code style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.siren || '—'}</code></td>
-                      <td><span className={`badge badge-${typeBadge(c.type)}`}>{c.type}</span></td>
-                      <td><span className={`badge badge-${c.regime === 'trimestriel' ? 'trim' : c.regime}`}>{regimeLabel[c.regime]}</span></td>
-                      {isExpertOrChef && <td><span className="text-muted text-sm">{c.collaborateurs || 'Non assigné'}</span></td>}
-                      <td>{new Date(c.cree_le).toLocaleDateString('fr-FR')}</td>
+                    <tr
+                      key={c.id}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/clients/${c.id}`)}
+                    >
                       <td>
+                        <strong style={{ color: 'var(--primary)' }}>{c.nom}</strong>
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                        {c.raison_sociale || '—'}
+                      </td>
+                      <td>
+                        {c.forme_juridique
+                          ? <span className="badge badge-autre" style={{ fontSize: 11 }}>{c.forme_juridique}</span>
+                          : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
+                      <td>
+                        {c.groupe
+                          ? <span className="badge badge-en_cours" style={{ fontSize: 11 }}>{c.groupe}</span>
+                          : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
+                      <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>{c.ville || '—'}</td>
+                      <td><code style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.siren || '—'}</code></td>
+                      <td>
+                        {c.regime_tva
+                          ? <span className={`badge badge-${c.regime_tva === 'trimestriel' ? 'trim' : c.regime_tva === 'mensuel' ? 'mensuel' : 'autre'}`} style={{ fontSize: 11 }}>{c.regime_tva}</span>
+                          : c.regime
+                            ? <span className={`badge badge-${c.regime === 'trimestriel' ? 'trim' : c.regime}`} style={{ fontSize: 11 }}>{regimeLabel[c.regime] || c.regime}</span>
+                            : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
+                      {isExpertOrChef && (
+                        <td>
+                          {(() => {
+                            const eq = parseEquipe(c.equipe);
+                            return eq.length > 0
+                              ? <EquipeAvatars equipe={eq} />
+                              : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>;
+                          })()}
+                        </td>
+                      )}
+                      <td onClick={e => e.stopPropagation()}>
                         <div className="td-actions">
                           {isExpertOrChef && (
                             <>

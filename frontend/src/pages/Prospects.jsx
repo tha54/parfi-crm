@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -219,7 +220,7 @@ function ProspectForm({ initial, onSave, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit}>
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
       {/* Type de prospect */}
       <div className="form-group">
@@ -442,6 +443,7 @@ function ConvertirModal({ prospect, onConfirm, onCancel }) {
 
 export default function Prospects() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [prospects, setProspects] = useState([]);
   const [loading, setLoading]     = useState(true);
   const [modal, setModal]         = useState(null);
@@ -631,7 +633,7 @@ export default function Prospects() {
       {modal?.type === 'create' && (
         <Modal title="Nouveau prospect" onClose={() => setModal(null)} wide>
           <ProspectForm
-            onSave={() => { setModal(null); load(); }}
+            onSave={() => { setModal(null); navigate('/pipeline'); }}
             onCancel={() => setModal(null)}
           />
         </Modal>

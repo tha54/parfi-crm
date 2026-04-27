@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../services/api';
+import TaskTimePanel from './TaskTimePanel';
 
 const STATUT_LABEL = { a_faire: 'À faire', en_cours: 'En cours', termine: 'Terminé', reporte: 'Reporté' };
 const STATUT_COLOR = { a_faire: '#6b7c93', en_cours: '#00b4d8', termine: '#00897b', reporte: '#e67e22' };
@@ -32,6 +33,7 @@ function initials(nom, prenom) {
  *   utilisateurs array     list of users for @mention dropdown
  */
 export default function TaskCommentDrawer({ tache, onClose, utilisateurs = [] }) {
+  const [activeTab, setActiveTab] = useState('details');
   const [comments, setComments] = useState([]);
   const [loadingComments, setLoadingComments] = useState(true);
   const [newComment, setNewComment] = useState('');
@@ -160,10 +162,10 @@ export default function TaskCommentDrawer({ tache, onClose, utilisateurs = [] })
       >
         {/* Header */}
         <div style={{
-          padding: '16px 20px', borderBottom: '1px solid var(--border)',
+          padding: '14px 20px 0', borderBottom: '1px solid rgba(255,255,255,0.12)',
           background: '#0F1F4B', color: '#fff', flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <span style={{ fontWeight: 700, fontSize: 15 }}>Détails de la tâche</span>
             <button
               onClick={onClose}
@@ -176,10 +178,39 @@ export default function TaskCommentDrawer({ tache, onClose, utilisateurs = [] })
               ×
             </button>
           </div>
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 2 }}>
+            {[
+              { key: 'details',  label: '📋 Détails' },
+              { key: 'temps',    label: '⏱ Temps' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                style={{
+                  padding: '7px 16px', border: 'none', cursor: 'pointer', fontSize: 12,
+                  fontWeight: 700, borderRadius: '6px 6px 0 0',
+                  background: activeTab === tab.key ? '#fff' : 'transparent',
+                  color: activeTab === tab.key ? '#0F1F4B' : 'rgba(255,255,255,0.7)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+
+          {/* ── Temps tab ── */}
+          {activeTab === 'temps' && (
+            <TaskTimePanel tache={tache} />
+          )}
+
+          {/* ── Détails tab ── */}
+          {activeTab === 'details' && <>
 
           {/* Task details */}
           <div style={{ marginBottom: 20 }}>
@@ -220,6 +251,7 @@ export default function TaskCommentDrawer({ tache, onClose, utilisateurs = [] })
                   ['Durée', tache.duree ? `${tache.duree}h` : '—'],
                   ['Client', tache.client_nom || '—'],
                   ['Assigné à', tache.prenom ? `${tache.prenom} ${tache.user_nom || ''}` : '—'],
+                  ['Assigné par', tache.assigne_par_prenom ? `${tache.assigne_par_prenom} ${tache.assigne_par_nom || ''}` : '—'],
                 ].map(([label, val]) => (
                   <tr key={label}>
                     <td style={{ padding: '5px 0', color: 'var(--text-muted)', width: 100, fontWeight: 600 }}>{label}</td>
@@ -385,6 +417,8 @@ export default function TaskCommentDrawer({ tache, onClose, utilisateurs = [] })
               {sending ? 'Envoi…' : 'Envoyer'}
             </button>
           </div>
+
+          </> /* end details tab */}
         </div>
       </div>
     </>

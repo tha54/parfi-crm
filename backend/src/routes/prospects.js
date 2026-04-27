@@ -68,7 +68,31 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
         req.user.id,
       ]
     );
-    const [[created]] = await pool.query('SELECT * FROM prospects WHERE id = ?', [result.insertId]);
+    const prospectId = result.insertId;
+    const [[created]] = await pool.query('SELECT * FROM prospects WHERE id = ?', [prospectId]);
+
+    // Auto-create pipeline card (opportunite) in "Nouveau contact" column
+    await pool.query(
+      `INSERT INTO opportunites (prospect_id, titre, statut, probabilite, cree_par)
+       VALUES (?,?,?,?,?)`,
+      [prospectId, nom.trim(), 'prospect', 10, req.user.id]
+    ).catch(() => {});
+
+    // Notify expert if creator is not expert
+    if (req.user.role !== 'expert') {
+      const [[expert]] = await pool.query(
+        `SELECT id FROM utilisateurs WHERE role='expert' AND actif=1 LIMIT 1`
+      ).catch(() => [[null]]);
+      if (expert) {
+        await pool.query(
+          `INSERT INTO notifications (utilisateur_id, type, titre, message, lien)
+           VALUES (?,?,?,?,?)`,
+          [expert.id, 'prospect', `Nouveau prospect — ${nom.trim()}`,
+           `Créé par ${req.user.prenom} ${req.user.nom}`, '/pipeline']
+        ).catch(() => {});
+      }
+    }
+
     res.status(201).json(created);
   } catch (err) {
     res.status(500).json({ message: err.message });

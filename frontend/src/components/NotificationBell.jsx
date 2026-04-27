@@ -3,12 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const TYPE_ICONS = {
-  tache_assignee: '📋',
-  tache_retard:   '⚠️',
-  ldm_signee:     '✅',
-  mention:        '@',
-  facture_impayee:'🧾',
-  autre:          '🔔',
+  tache_assignee:  '📋',
+  tache_retard:    '⚠️',
+  tache_terminee:  '✅',
+  budget_alerte:   '🟡',
+  budget_depasse:  '🔴',
+  ldm_signee:      '🖊',
+  mention:         '💬',
+  facture_impayee: '🧾',
+  appel:           '📞',
+  prospect:        '📡',
+  absence:         '🏖️',
+  interaction:     '💬',
+  autre:           '🔔',
 };
 
 function relativeTime(iso) {
