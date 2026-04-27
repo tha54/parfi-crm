@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
+import DimensionnementWizard from './DimensionnementWizard';
 
 // ─── Données tarifaires ───────────────────────────────────────────────────────
 
@@ -234,6 +235,7 @@ const GROUPES = [...new Set(MISSIONS_DEF.map(m => m.groupe))];
 export default function Dimensionnement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [mode, setMode] = useState('wizard'); // 'wizard' | 'legacy'
   const returnTo  = searchParams.get('returnTo');   // 'devis' | 'ldm' | null
   const urlClientId = searchParams.get('clientId'); // pre-filled client
 
@@ -389,11 +391,34 @@ export default function Dimensionnement() {
     </div>
   ) : null;
 
+  if (mode === 'wizard') {
+    return (
+      <>
+        <div className="page-header">
+          <h1>Dimensionnement des honoraires</h1>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setMode('legacy')}
+            title="Basculer vers l'ancien outil de dimensionnement (tarification par tranche CA)"
+          >
+            🔧 Ancien outil
+          </button>
+        </div>
+        <div className="page-body">
+          <DimensionnementWizard />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="page-header">
-        <h1>Dimensionnement des honoraires</h1>
+        <h1>Dimensionnement — Outil classique</h1>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setMode('wizard')}>
+            ← Nouveau wizard
+          </button>
           <button className="btn btn-ghost" onClick={handleGeneratePDF} disabled={lignes.length === 0}>
             🖨️ Aperçu PDF
           </button>

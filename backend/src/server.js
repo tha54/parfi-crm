@@ -41,6 +41,7 @@ const callsRoutes = require('./routes/calls');
 const searchRoutes = require('./routes/search');
 const absencesRoutes = require('./routes/absences');
 const rapportsRoutes = require('./routes/rapports');
+const dimensionnementRoutes = require('./routes/dimensionnement');
 
 const app = express();
 
@@ -93,6 +94,7 @@ app.use('/api/calls', callsRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/absences', absencesRoutes);
 app.use('/api/rapports', rapportsRoutes);
+app.use('/api/dimensionnement', dimensionnementRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.3' }));
 

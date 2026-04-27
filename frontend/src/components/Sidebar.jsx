@@ -48,7 +48,7 @@ export default function Sidebar() {
               <Link to="/pipeline"        icon="📊" label="Pipeline" />
               <Link to="/devis"           icon="📄" label="Devis" />
               <Link to="/lettres-mission" icon="📋" label="Lettres de mission" />
-              <Link to="/dimensionnement" icon="📐" label="Dimensionnement" />
+              <Link to="/dimensionnement" icon="📐" label="Devis & LDM" />
             </div>
 
             <div className="nav-section">
