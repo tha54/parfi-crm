@@ -418,6 +418,7 @@ export default function Devis() {
               📐 Dimensionner
             </button>
           )}
+          {canEdit && <button className="btn btn-ghost btn-sm" onClick={() => navigate('/devis/new')} title="Créer un devis via le wizard (3 étapes)">✨ Wizard</button>}
           {canEdit && <button className="btn btn-primary" onClick={openCreate}>+ Nouveau devis</button>}
         </div>
       </div>
@@ -477,7 +478,7 @@ export default function Devis() {
                   </thead>
                   <tbody>
                     {filtered.map(d => (
-                      <tr key={d.id}>
+                      <tr key={d.id} onClick={e => { if (!e.target.closest('select,button')) navigate(`/devis/${d.id}`); }} style={{ cursor: 'pointer' }}>
                         <td><code style={{ fontSize: 12 }}>{d.numero}</code></td>
                         <td>
                           {d.client_nom

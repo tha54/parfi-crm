@@ -12,6 +12,8 @@ export default function Sidebar() {
   const handleLogout = () => { logout(); navigate('/login'); };
   const isExpert = user?.role === 'expert';
   const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
+  // role_metier from JWT (populated after re-login; falls back to role-based check)
+  const isDevisAccess = ['expert_comptable','chef_de_groupe'].includes(user?.role_metier) || isExpertOrChef;
 
   const Link = ({ to, icon, label }) => (
     <NavLink to={to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
@@ -46,9 +48,9 @@ export default function Sidebar() {
               <div className="nav-section-label">Commercial</div>
               <Link to="/prospects"       icon="📡" label="Prospects" />
               <Link to="/pipeline"        icon="📊" label="Pipeline" />
-              <Link to="/devis"           icon="📄" label="Devis" />
-              <Link to="/lettres-mission" icon="📋" label="Lettres de mission" />
-              <Link to="/dimensionnement" icon="📐" label="Devis & LDM" />
+              {isDevisAccess && <Link to="/devis"           icon="📄" label="Devis" />}
+              {isDevisAccess && <Link to="/lettres-mission" icon="📋" label="Lettres de mission" />}
+              <Link to="/dimensionnement" icon="📐" label="Dimensionnement" />
             </div>
 
             <div className="nav-section">

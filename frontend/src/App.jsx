@@ -33,6 +33,9 @@ import TiimeImport from './pages/TiimeImport';
 import ClientIntake from './pages/ClientIntake';
 import Absences from './pages/Absences';
 import Rapports from './pages/Rapports';
+import DevisWizard from './pages/DevisWizard';
+import DevisDetail from './pages/DevisDetail';
+import LDMDetail from './pages/LDMDetail';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -77,8 +80,11 @@ function AppRoutes() {
       <Route path="/documents" element={<ProtectedRoute><AppLayout><GED /></AppLayout></ProtectedRoute>} />
       <Route path="/collaborateurs" element={<ProtectedRoute roles={['expert']}><AppLayout><Collaborateurs /></AppLayout></ProtectedRoute>} />
       <Route path="/devis" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Devis /></AppLayout></ProtectedRoute>} />
+      <Route path="/devis/new" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><DevisWizard /></AppLayout></ProtectedRoute>} />
+      <Route path="/devis/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><DevisDetail /></AppLayout></ProtectedRoute>} />
       <Route path="/factures" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Factures /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LettresMission /></AppLayout></ProtectedRoute>} />
+      <Route path="/lettres-mission/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LDMDetail /></AppLayout></ProtectedRoute>} />
       <Route path="/prospects" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Prospects /></AppLayout></ProtectedRoute>} />
       <Route path="/pipeline" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
       <Route path="/dimensionnement" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Dimensionnement /></AppLayout></ProtectedRoute>} />

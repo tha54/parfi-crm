@@ -174,7 +174,7 @@ export default function LettresMission() {
                   </thead>
                   <tbody>
                     {filtered.map(l => (
-                      <tr key={l.id}>
+                      <tr key={l.id} onClick={e => { if (!e.target.closest('select,button')) navigate(`/lettres-mission/${l.id}`); }} style={{ cursor: 'pointer' }}>
                         <td><code style={{ fontSize: 12 }}>{l.numero}</code></td>
                         <td>{l.client_nom || <span className="text-muted">—</span>}</td>
                         <td>

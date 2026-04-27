@@ -23,13 +23,13 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Identifiants incorrects' });
     }
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, nom: user.nom, prenom: user.prenom },
+      { id: user.id, email: user.email, role: user.role, role_metier: user.role_metier, nom: user.nom, prenom: user.prenom },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
     res.json({
       token,
-      user: { id: user.id, email: user.email, role: user.role, nom: user.nom, prenom: user.prenom }
+      user: { id: user.id, email: user.email, role: user.role, role_metier: user.role_metier, nom: user.nom, prenom: user.prenom }
     });
   } catch (err) {
     res.status(500).json({ message: 'Erreur serveur' });

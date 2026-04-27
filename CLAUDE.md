@@ -47,10 +47,26 @@ CRM cabinet Parfi France (Longwy). Stack : React + Vite (nginx /dist), Express.j
 - Sidebar : "Dimensionnement" → "Devis & LDM"
 - Calcul temps-based conforme BRIEF : 5 sections × taux horaires (EC=84, Collab=42, Social=28, Juridique=60, Aide=28)
 
+### Session 3 — Rôles métier + pages Devis/LDM (BRIEF instructions)
+**Fait :**
+- `utilisateurs.role_metier` ENUM ajouté : expert_comptable / chef_de_groupe / chef_de_mission / collaborateur / collaborateur_social / collaborateur_juridique
+  - Thierry(s) → expert_comptable, Valérie → chef_de_groupe, Audrey → chef_de_mission
+- `role_metier` inclus dans le JWT et la réponse de login (auth.js)
+- `lettres_mission.devis_id` et `lettres_mission.dimensionnement_id` FK ajoutés
+- `mandats.ldm_id` FK ajouté
+- Route POST `/api/lettres-mission/:id/signer` — signature LDM + injection complète des tâches dimensionnement (ou repartitionTaches JSON) + création 3 mandats (prélèvement, impôts, URSSAF) + notifications
+- Route GET/PUT `/api/lettres-mission/:id/mandats` — gestion mandats par LDM
+- `DevisWizard.jsx` — wizard 3 étapes : identification (prospect/client autocomplete) + prestations (import dimensionnement existant ou saisie manuelle) + récapitulatif avec actions brouillon/envoyé
+- `DevisDetail.jsx` — page détail devis `/devis/:id` avec statut inline, création LDM depuis devis accepté
+- `LDMDetail.jsx` — page détail LDM `/lettres-mission/:id` avec sign button, mandats toggle, tâches injectées
+- Routes `/devis/new`, `/devis/:id`, `/lettres-mission/:id` ajoutées dans App.jsx
+- Devis + LDM listes : clic sur ligne → navigate to detail, bouton "Wizard" dans Devis
+- Sidebar : accès Devis + LDM conditionné par `role_metier` (expert_comptable/chef_de_groupe) avec fallback sur l'ancien role
+
 **Reste à faire (sessions suivantes) :**
-- Génération PDF devis depuis le wizard (actuellement seul l'ancien outil génère PDF)
-- `LDMViewer` — affichage lettre de mission OEC-conforme
-- `DimensionnementList` — historique des devis/LDM par client
+- Génération PDF devis (actuellement seul l'ancien outil génère PDF)
+- LDM OEC-conforme avec preview HTML imprimable
+- DimensionnementList — historique des devis/LDM par client
 - Lien depuis ClientCockpit → wizard avec client pré-sélectionné
-- Facturation (plan de facturation depuis devis)
+- Facturation depuis devis (plan de facturation)
 - GED, Hub comm, Assistant IA Vapi

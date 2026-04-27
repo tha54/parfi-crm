@@ -131,24 +131,18 @@ const INTERVENANT_COLORS = {
 
 const SECTIONS_ORDER = ['Tenue comptable', 'Diligences comptables', 'Fiscalité', 'Social', 'Juridique'];
 
-// ── Composant Slider avec valeur ──────────────────────────────────────────────
-function SliderField({ label, value, onChange, min = 0, max, step = 1, unit = '' }) {
+// ── Champ numérique volumétrie ────────────────────────────────────────────────
+function NumField({ label, value, onChange, min = 0, unit = '' }) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{label}</label>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-hover)', minWidth: 50, textAlign: 'right' }}>
-          {value}{unit}
-        </span>
-      </div>
-      <input
-        type="range" min={min} max={max} step={step} value={value}
-        onChange={e => onChange(Number(e.target.value))}
-        style={{ width: '100%', accentColor: 'var(--accent)' }}
-      />
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-        <span>{min}{unit}</span>
-        <span>{max}{unit}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+      <label style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="number" min={min} value={value}
+          onChange={e => onChange(Math.max(min, Number(e.target.value) || 0))}
+          style={{ width: 90, textAlign: 'right', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, fontWeight: 600, color: 'var(--primary)' }}
+        />
+        {unit && <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{unit}</span>}
       </div>
     </div>
   );
@@ -350,15 +344,15 @@ function Step2({ data, onChange }) {
       </div>
 
       <div style={{ background: 'var(--accent-light)', borderRadius: 10, padding: '20px 24px', marginTop: 8 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--accent-hover)', marginBottom: 20, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--accent-hover)', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
           Volumétrie mensuelle
         </div>
 
-        <SliderField label="Factures d'achat / mois" value={data.factures_achat} onChange={sp('factures_achat')} min={0} max={500} unit=" pièces" />
-        <SliderField label="Factures de vente / mois" value={data.factures_vente} onChange={sp('factures_vente')} min={0} max={500} unit=" pièces" />
-        <SliderField label="Lignes de banque / mois" value={data.lignes_banque} onChange={sp('lignes_banque')} min={0} max={1000} unit=" lignes" />
-        <SliderField label="Immobilisations (total)" value={data.immobilisations} onChange={sp('immobilisations')} min={0} max={200} unit=" immos" />
-        <SliderField label="Effectif salarié" value={data.effectif} onChange={sp('effectif')} min={0} max={50} unit=" salariés" />
+        <NumField label="Factures d'achat / mois"  value={data.factures_achat}  onChange={sp('factures_achat')}  unit="pièces" />
+        <NumField label="Factures de vente / mois"  value={data.factures_vente}  onChange={sp('factures_vente')}  unit="pièces" />
+        <NumField label="Lignes de banque / mois"   value={data.lignes_banque}   onChange={sp('lignes_banque')}   unit="lignes" />
+        <NumField label="Immobilisations (total)"   value={data.immobilisations} onChange={sp('immobilisations')} unit="immos" />
+        <NumField label="Effectif salarié"          value={data.effectif}        onChange={sp('effectif')}        unit="salariés" />
       </div>
 
       {/* Résumé rapide */}
@@ -501,19 +495,16 @@ function Step3({ data, lignes, onChange, onSave, onSendDevis, onSignLdm, saving,
 
       {/* Remise */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <label style={{ fontWeight: 600, fontSize: 13 }}>Remise commerciale</label>
-          <span style={{ fontWeight: 700, color: remise > 0 ? '#e74c3c' : 'var(--text-muted)' }}>
-            {remise > 0 ? `−${remise}%` : 'Aucune'}
-          </span>
-        </div>
-        <input
-          type="range" min={0} max={30} step={1} value={remise}
-          onChange={e => onChange({ remise_pct: Number(e.target.value) })}
-          style={{ width: '100%', accentColor: 'var(--accent)' }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-          <span>0%</span><span>30%</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="number" min={0} max={30} value={remise}
+              onChange={e => onChange({ remise_pct: Math.min(30, Math.max(0, Number(e.target.value) || 0)) })}
+              style={{ width: 70, textAlign: 'right', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, fontWeight: 600, color: remise > 0 ? '#e74c3c' : 'var(--text)' }}
+            />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>%</span>
+          </div>
         </div>
       </div>
 
