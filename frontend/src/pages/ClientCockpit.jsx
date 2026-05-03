@@ -90,6 +90,17 @@ const LDM_STATUT_BADGE = { brouillon: 'autre', envoyee: 'en_cours', signee: 'ter
 const LDM_STATUT_LABEL = { brouillon: 'Brouillon', envoyee: 'Envoyée', signee: 'Signée', archivee: 'Archivée' };
 
 const ROLE_LABEL = { expert: 'Expert-comptable', chef_mission: 'Chef de mission', collaborateur: 'Collaborateur' };
+const ROLE_METIER_LABEL = {
+  expert_comptable:       'Expert-comptable',
+  chef_de_groupe:         'Chef de groupe',
+  chef_de_mission:        'Chef de mission',
+  collaborateur:          'Collaborateur',
+  collaborateur_medior:   'Collaborateur',
+  collaborateur_senior:   'Collaborateur senior',
+  collaborateur_social:   'Collaborateur social',
+  collaborateur_juridique:'Collaborateur juridique',
+  juriste:                'Juriste',
+};
 
 const REGIME_TVA_LABEL = {
   // Nouveaux ENUM
@@ -918,12 +929,12 @@ function TabEquipe({ attributions, clientId, currentUser, onReload, allUsers }) 
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{a.prenom} {a.nom}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {a.email} · {ROLE_LABEL[a.role] || a.role}
+                      {ROLE_METIER_LABEL[a.role_metier] || ROLE_LABEL[a.role] || a.role}
                     </div>
                   </div>
-                  <span className={`badge badge-${a.role_sur_dossier === 'responsable' ? 'responsable' : 'assistant'}`}>
-                    {a.role_sur_dossier === 'responsable' ? 'Responsable' : 'Assistant'}
-                  </span>
+                  {a.role_sur_dossier === 'responsable' && (
+                    <span className="badge badge-responsable">Référent</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -947,17 +958,19 @@ function TabEquipe({ attributions, clientId, currentUser, onReload, allUsers }) 
                 />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{u.prenom} {u.nom}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ROLE_LABEL[u.role] || u.role}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {ROLE_METIER_LABEL[u.role_metier] || ROLE_LABEL[u.role] || u.role}
+                  </div>
                 </div>
                 {u.assigned && (
                   <select
                     value={u.role_sur_dossier}
                     onChange={(e) => setRoleSurDossier(u.id, e.target.value)}
                     className="form-control"
-                    style={{ width: 140, fontSize: 12, padding: '4px 8px' }}
+                    style={{ width: 150, fontSize: 12, padding: '4px 8px' }}
                   >
-                    <option value="responsable">Responsable</option>
-                    <option value="assistant">Assistant</option>
+                    <option value="responsable">Référent dossier</option>
+                    <option value="assistant">Intervenant</option>
                   </select>
                 )}
               </div>

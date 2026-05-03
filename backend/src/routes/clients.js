@@ -247,7 +247,7 @@ router.get('/:id', verifyToken, async (req, res) => {
     const [clients] = await pool.query('SELECT * FROM clients WHERE id = ?', [req.params.id]);
     if (clients.length === 0) return res.status(404).json({ message: 'Client introuvable' });
     const [attributions] = await pool.query(
-      `SELECT a.*, u.nom, u.prenom, u.email, u.role
+      `SELECT a.*, u.nom, u.prenom, u.email, u.role, u.role_metier
        FROM attributions a JOIN utilisateurs u ON a.utilisateur_id = u.id
        WHERE a.client_id = ?`,
       [req.params.id]
