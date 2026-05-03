@@ -2,20 +2,43 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
-// ── Taux horaires ─────────────────────────────────────────────────────────────
-const TAUX_HORAIRES = {
+// ── Taux horaires par défaut (fallback si grille non chargée) ─────────────────
+const TAUX_HORAIRES_DEFAULT = {
   'Expert-comptable':        84,
   'Collaborateur':           42,
-  'Collaborateur Social':    28,
-  'Collaborateur Juridique': 60,
+  'Collaborateur Social':    42,
+  'Collaborateur Juridique': 42,
   'Aide comptable':          28,
 };
 
-const tarif = (min, interv) =>
-  Math.round(((min / 60) * (TAUX_HORAIRES[interv] || 42)) * 100) / 100;
+// Mapping catégorie grille_tarifaire → labels intervenant du wizard
+const CATEGORIE_TO_INTERVENANTS = {
+  expert:        ['Expert-comptable'],
+  chef_mission:  [],
+  collaborateur: ['Collaborateur', 'Collaborateur Social', 'Collaborateur Juridique'],
+  stagiaire:     ['Aide comptable'],
+  secretaire:    [],
+};
+
+function buildTauxFromGrille(grille) {
+  const taux = { ...TAUX_HORAIRES_DEFAULT };
+  for (const g of grille) {
+    const targets = CATEGORIE_TO_INTERVENANTS[g.categorie] || [];
+    for (const t of targets) {
+      if (!taux[t] || taux[t] === TAUX_HORAIRES_DEFAULT[t]) {
+        taux[t] = Number(g.taux_horaire);
+      }
+    }
+  }
+  return taux;
+}
+
+const makeTarif = (taux) => (min, interv) =>
+  Math.round(((min / 60) * (taux[interv] || 42)) * 100) / 100;
 
 // ── Calcul de toutes les lignes ───────────────────────────────────────────────
-function calculerLignes({ type_entite, regime_fiscal, regime_tva, factures_achat, factures_vente, lignes_banque, immobilisations, effectif }) {
+function calculerLignes({ type_entite, regime_fiscal, regime_tva, factures_achat, factures_vente, lignes_banque, immobilisations, effectif, operations_diverses: opDivParam = null, tauxHoraires }) {
+  const tarif = makeTarif(tauxHoraires || TAUX_HORAIRES_DEFAULT);
   const isSociete     = type_entite === 'societe';
   const isAssociation = type_entite === 'association';
   const fa  = Number(factures_achat)  || 0;
@@ -23,6 +46,7 @@ function calculerLignes({ type_entite, regime_fiscal, regime_tva, factures_achat
   const lb  = Number(lignes_banque)   || 0;
   const imm = Number(immobilisations) || 0;
   const eff = Number(effectif)        || 0;
+  const od  = opDivParam != null ? Number(opDivParam) : Math.round((fa + fv) * 0.1);
   const nb_decl_tva = regime_tva === 'mensuel' ? 12 : regime_tva === 'trimestriel' ? 4 : 0;
 
   const l = (section, libelle, intervenant, periodicite, temps_minutes) => ({
@@ -46,7 +70,7 @@ function calculerLignes({ type_entite, regime_fiscal, regime_tva, factures_achat
     const m = Math.max(30, Math.round((lb / 60) * 60));
     lignes.push(l('Tenue comptable', 'Journaux de trésorerie', 'Aide comptable', 'Mensuel', m));
   }
-  lignes.push(l('Tenue comptable', "Journaux d'OD", 'Aide comptable', 'Mensuel', 30));
+  lignes.push(l('Tenue comptable', "Journaux d'OD", 'Aide comptable', 'Mensuel', Math.max(30, Math.round((od / 30) * 60))));
 
   // DILIGENCES COMPTABLES
   lignes.push(l('Diligences comptables', 'Constitution dossier permanent',          'Collaborateur', 'Ponctuel Jan',      30));
@@ -132,7 +156,7 @@ const INTERVENANT_COLORS = {
 const SECTIONS_ORDER = ['Tenue comptable', 'Diligences comptables', 'Fiscalité', 'Social', 'Juridique'];
 
 // ── Champ numérique volumétrie ────────────────────────────────────────────────
-function NumField({ label, value, onChange, min = 0, unit = '' }) {
+function NumField({ label, value, onChange, min = 0, unit = '', badge = null }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
       <label style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{label}</label>
@@ -143,6 +167,7 @@ function NumField({ label, value, onChange, min = 0, unit = '' }) {
           style={{ width: 90, textAlign: 'right', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, fontWeight: 600, color: 'var(--primary)' }}
         />
         {unit && <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{unit}</span>}
+        {badge}
       </div>
     </div>
   );
@@ -307,6 +332,18 @@ function Step1({ data, onChange, clients }) {
 function Step2({ data, onChange }) {
   const sp = (k) => (v) => onChange({ [k]: v });
 
+  const AutoBadge = () => (
+    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-hover)', whiteSpace: 'nowrap', padding: '2px 6px', background: 'var(--accent-light)', borderRadius: 4 }}>
+      ⚡ auto
+    </span>
+  );
+  const ResetBtn = ({ onClick }) => (
+    <button type="button" onClick={onClick} title="Rétablir le calcul automatique"
+      style={{ fontSize: 11, padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', cursor: 'pointer', color: 'var(--accent-hover)' }}>
+      ↺
+    </button>
+  );
+
   return (
     <div>
       <h3 style={{ marginBottom: 20, color: 'var(--primary)' }}>Étape 2 — Paramètres & volumétrie</h3>
@@ -350,7 +387,24 @@ function Step2({ data, onChange }) {
 
         <NumField label="Factures d'achat / mois"  value={data.factures_achat}  onChange={sp('factures_achat')}  unit="pièces" />
         <NumField label="Factures de vente / mois"  value={data.factures_vente}  onChange={sp('factures_vente')}  unit="pièces" />
-        <NumField label="Lignes de banque / mois"   value={data.lignes_banque}   onChange={sp('lignes_banque')}   unit="lignes" />
+        <NumField
+          label="Lignes de banque / mois"
+          value={data.lignes_banque}
+          onChange={v => onChange({ lignes_banque: v, _lockLignesBanque: true })}
+          unit="lignes"
+          badge={data._lockLignesBanque
+            ? <ResetBtn onClick={() => onChange({ _lockLignesBanque: false, lignes_banque: Math.round((data.factures_achat + data.factures_vente) * 1.2) })} />
+            : <AutoBadge />}
+        />
+        <NumField
+          label="Opérations diverses / mois"
+          value={data.operations_diverses}
+          onChange={v => onChange({ operations_diverses: v, _lockOpDiv: true })}
+          unit="pièces"
+          badge={data._lockOpDiv
+            ? <ResetBtn onClick={() => onChange({ _lockOpDiv: false, operations_diverses: Math.round((data.factures_achat + data.factures_vente) * 0.1) })} />
+            : <AutoBadge />}
+        />
         <NumField label="Immobilisations (total)"   value={data.immobilisations} onChange={sp('immobilisations')} unit="immos" />
         <NumField label="Effectif salarié"          value={data.effectif}        onChange={sp('effectif')}        unit="salariés" />
       </div>
@@ -367,17 +421,62 @@ function Step2({ data, onChange }) {
 }
 
 // ── Étape 3 : Résultats + Remise ──────────────────────────────────────────────
-function Step3({ data, lignes, onChange, onSave, onSendDevis, onSignLdm, saving, savedId }) {
+function Step3({ data, lignes, onChange, onSave, onCreateDevis, onCreateLdm, saving, savedId, tauxHoraires }) {
   const [expandedSections, setExpandedSections] = useState(new Set(SECTIONS_ORDER));
-  const [editingLignes, setEditingLignes] = useState(null); // null = use computed lignes
+  const [editingLignes, setEditingLignes] = useState(null);
+
+  const tarif = makeTarif(tauxHoraires || TAUX_HORAIRES_DEFAULT);
 
   const displayLignes = editingLignes || lignes;
 
-  const toggleActif = (idx) => {
-    const updated = displayLignes.map((l, i) => i === idx ? { ...l, actif: !l.actif } : l);
+  const applyUpdate = (updated) => {
     setEditingLignes(updated);
     onChange({ lignes_override: updated });
   };
+
+  const toggleActif = (idx) => {
+    applyUpdate(displayLignes.map((l, i) => i === idx ? { ...l, actif: !l.actif } : l));
+  };
+
+  const updateTemps = (idx, newVal) => {
+    const mins = Math.max(0, parseInt(newVal) || 0);
+    applyUpdate(displayLignes.map((l, i) =>
+      i === idx ? { ...l, temps_minutes: mins, tarif_ht: tarif(mins, l.intervenant) } : l
+    ));
+  };
+
+  const updateTarif = (idx, val) => {
+    const amount = Math.max(0, parseFloat(val) || 0);
+    applyUpdate(displayLignes.map((l, i) => i === idx ? { ...l, tarif_ht: amount } : l));
+  };
+
+  const updateTarifMensuel = (idx, val) => {
+    const monthly = Math.max(0, parseFloat(val) || 0);
+    applyUpdate(displayLignes.map((l, i) =>
+      i === idx ? { ...l, montant_mensuel: monthly, tarif_ht: Math.round(monthly * 12 * 100) / 100 } : l
+    ));
+  };
+
+  const updateMode = (idx, mode) => {
+    applyUpdate(displayLignes.map((l, i) => {
+      if (i !== idx) return l;
+      const updated = { ...l, mode_saisie: mode };
+      if (mode === 'temps') {
+        updated.tarif_ht = tarif(l.temps_minutes, l.intervenant);
+        delete updated.montant_mensuel;
+      } else if (mode === 'forfait_mensuel') {
+        updated.montant_mensuel = Math.round(l.tarif_ht / 12 * 100) / 100;
+      }
+      return updated;
+    }));
+  };
+
+  const resetOverrides = () => {
+    setEditingLignes(null);
+    onChange({ lignes_override: null });
+  };
+
+  const hasOverrides = editingLignes !== null;
 
   const toggleSection = (section) => {
     setExpandedSections(s => {
@@ -400,6 +499,19 @@ function Step3({ data, lignes, onChange, onSave, onSendDevis, onSignLdm, saving,
   return (
     <div>
       <h3 style={{ marginBottom: 20, color: 'var(--primary)' }}>Étape 3 — Résultat & validation</h3>
+
+      {/* Bouton reset si des valeurs ont été modifiées manuellement */}
+      {hasOverrides && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={resetOverrides}
+            style={{ fontSize: 12, color: 'var(--accent-hover)' }}
+          >
+            ↺ Rétablir les valeurs automatiques
+          </button>
+        </div>
+      )}
 
       {/* Tableau des missions par section */}
       {sections.map(section => {
@@ -434,15 +546,22 @@ function Step3({ data, lignes, onChange, onSave, onSendDevis, onSignLdm, saving,
                   <tr style={{ background: '#f8fafc' }}>
                     <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', width: 36 }}></th>
                     <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)' }}>Tâche</th>
-                    <th style={{ padding: '7px 12px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 140 }}>Intervenant</th>
-                    <th style={{ padding: '7px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 90 }}>Périodicité</th>
-                    <th style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', width: 70 }}>Temps</th>
-                    <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', width: 80 }}>Tarif HT</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 130 }}>Intervenant</th>
+                    <th style={{ padding: '7px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 80 }}>Périodicité</th>
+                    <th style={{ padding: '7px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 80 }}>Mode</th>
+                    <th style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', width: 90 }}>Temps (min)</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', width: 110 }}>Tarif HT</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sectionLines.map((ligne, idx) => {
                     const globalIdx = displayLignes.indexOf(ligne);
+                    const mode = ligne.mode_saisie || 'temps';
+                    const origLigne = lignes[globalIdx];
+                    const tempsModified = hasOverrides && editingLignes[globalIdx]?.temps_minutes !== origLigne?.temps_minutes;
+                    const tarifModified = hasOverrides && editingLignes[globalIdx]?.tarif_ht !== origLigne?.tarif_ht;
+                    const modeChanged   = hasOverrides && (editingLignes[globalIdx]?.mode_saisie || 'temps') !== 'temps';
+
                     return (
                       <tr
                         key={idx}
@@ -472,11 +591,78 @@ function Step3({ data, lignes, onChange, onSave, onSendDevis, onSignLdm, saving,
                         <td style={{ padding: '7px 8px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11 }}>
                           {ligne.periodicite}
                         </td>
-                        <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--text-muted)', fontSize: 11 }}>
-                          {fmtMin(ligne.temps_minutes)}
+                        <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                          <select
+                            value={mode}
+                            onChange={e => updateMode(globalIdx, e.target.value)}
+                            style={{
+                              fontSize: 10, padding: '3px 4px',
+                              border: `1px solid ${modeChanged ? 'var(--accent)' : 'var(--border)'}`,
+                              borderRadius: 4, background: 'var(--surface)',
+                              color: modeChanged ? 'var(--accent-hover)' : 'var(--text)',
+                            }}
+                          >
+                            <option value="temps">⏱ Temps</option>
+                            <option value="forfait_annuel">€/an</option>
+                            <option value="forfait_mensuel">€/mois</option>
+                          </select>
                         </td>
-                        <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--primary)' }}>
-                          {fmt(ligne.tarif_ht)}
+                        <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                          {mode === 'temps' ? (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                              <input
+                                type="number" min={0}
+                                value={ligne.temps_minutes}
+                                onChange={e => updateTemps(globalIdx, e.target.value)}
+                                style={{
+                                  width: 60, textAlign: 'right', padding: '3px 6px',
+                                  border: `1px solid ${tempsModified ? 'var(--accent)' : 'var(--border)'}`,
+                                  borderRadius: 4, fontSize: 12, fontWeight: 600,
+                                  color: tempsModified ? 'var(--accent-hover)' : 'var(--primary)',
+                                  background: 'var(--surface)',
+                                }}
+                              />
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>min</span>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '4px 12px', textAlign: 'right' }}>
+                          {mode === 'forfait_mensuel' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <input
+                                  type="number" min={0} step={0.01}
+                                  value={ligne.montant_mensuel ?? Math.round(ligne.tarif_ht / 12 * 100) / 100}
+                                  onChange={e => updateTarifMensuel(globalIdx, e.target.value)}
+                                  style={{
+                                    width: 68, textAlign: 'right', padding: '3px 6px',
+                                    border: '1px solid var(--accent)', borderRadius: 4,
+                                    fontSize: 12, fontWeight: 600, color: 'var(--accent-hover)', background: 'var(--surface)',
+                                  }}
+                                />
+                                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>€/mois</span>
+                              </div>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{fmt(ligne.tarif_ht)} /an</span>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                              <input
+                                type="number" min={0} step={0.01}
+                                value={ligne.tarif_ht}
+                                onChange={e => updateTarif(globalIdx, e.target.value)}
+                                style={{
+                                  width: 72, textAlign: 'right', padding: '3px 6px',
+                                  border: `1px solid ${tarifModified ? 'var(--accent)' : 'var(--border)'}`,
+                                  borderRadius: 4, fontSize: 12, fontWeight: 600,
+                                  color: tarifModified ? 'var(--accent-hover)' : 'var(--primary)',
+                                  background: 'var(--surface)',
+                                }}
+                              />
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>€</span>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -541,38 +727,25 @@ function Step3({ data, lignes, onChange, onSave, onSendDevis, onSignLdm, saving,
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions principales */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <button
-          className="btn btn-ghost"
-          onClick={() => onSave('brouillon')}
-          disabled={!!saving}
-          style={{ justifyContent: 'center', padding: 11 }}
-        >
-          {saving === 'brouillon' ? 'Enregistrement…' : '💾 Enregistrer comme brouillon'}
+        <button className="btn btn-ghost" onClick={() => onSave('brouillon')} disabled={!!saving}
+          style={{ justifyContent: 'center', padding: 11 }}>
+          {saving === 'brouillon' ? 'Enregistrement…' : '💾 Sauvegarder brouillon'}
         </button>
-        <button
-          className="btn btn-primary"
-          onClick={() => onSave('devis_envoye')}
-          disabled={!!saving}
-          style={{ justifyContent: 'center', padding: 11 }}
-        >
-          {saving === 'devis_envoye' ? 'Envoi…' : '📄 Enregistrer + Marquer comme devis envoyé'}
-        </button>
-        {savedId && (
-          <button
-            className="btn"
-            onClick={onSignLdm}
-            disabled={!!saving || !data.client_id}
-            style={{ justifyContent: 'center', padding: 11, background: '#0f1f4b', color: '#fff', border: 'none' }}
-            title={!data.client_id ? 'Un client CRM est requis pour signer la LDM' : ''}
-          >
-            {saving === 'ldm' ? 'Signature en cours…' : '📋 Signer la LDM → Injecter les tâches'}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <button className="btn" onClick={onCreateDevis} disabled={!!saving}
+            style={{ justifyContent: 'center', padding: 13, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14 }}>
+            {saving === 'devis' ? 'Création…' : '📄 Créer le Devis'}
           </button>
-        )}
-        {!data.client_id && savedId && (
+          <button className="btn" onClick={onCreateLdm} disabled={!!saving}
+            style={{ justifyContent: 'center', padding: 13, background: '#0f1f4b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14 }}>
+            {saving === 'ldm' ? 'Création…' : '📋 Créer la LDM'}
+          </button>
+        </div>
+        {!data.client_id && (
           <div style={{ fontSize: 11, color: '#e67e22', textAlign: 'center' }}>
-            ⚠ Liez un client CRM (étape 1) pour activer la signature LDM
+            ⚠ Liez un client CRM (étape 1) pour créer un Devis ou une LDM
           </div>
         )}
       </div>
@@ -585,40 +758,60 @@ export default function DimensionnementWizard({ onBack }) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [clients, setClients] = useState([]);
+  const [tauxHoraires, setTauxHoraires] = useState(TAUX_HORAIRES_DEFAULT);
   const [saving, setSaving] = useState(null);
   const [savedId, setSavedId] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [wizardBlock, setWizardBlock] = useState(null);
 
   const [formData, setFormData] = useState({
-    type_entite:       'societe',
-    regime_fiscal:     'reel_normal',
-    regime_tva:        'mensuel',
-    nb_etablissements: 1,
-    factures_achat:    0,
-    factures_vente:    0,
-    lignes_banque:     0,
-    immobilisations:   0,
-    effectif:          0,
-    client_id:         null,
-    nom_client_libre:  '',
-    siren:             '',
-    remise_pct:        0,
-    lignes_override:   null,
+    type_entite:         'societe',
+    regime_fiscal:       'reel_normal',
+    regime_tva:          'mensuel',
+    nb_etablissements:   1,
+    factures_achat:      0,
+    factures_vente:      0,
+    lignes_banque:       0,
+    operations_diverses: 0,
+    immobilisations:     0,
+    effectif:            0,
+    client_id:           null,
+    nom_client_libre:    '',
+    siren:               '',
+    remise_pct:          0,
+    lignes_override:     null,
+    _lockLignesBanque:   false,
+    _lockOpDiv:          false,
   });
 
   useEffect(() => {
     api.get('/clients').then(r => setClients(r.data)).catch(() => {});
+    api.get('/parametres/grille-tarifaire').then(r => {
+      if (r.data?.length) setTauxHoraires(buildTauxFromGrille(r.data));
+    }).catch(() => {});
   }, []);
 
   const updateForm = useCallback((partial) => {
-    setFormData(d => ({ ...d, ...partial }));
+    setFormData(d => {
+      const next = { ...d, ...partial };
+      if ('factures_achat' in partial || 'factures_vente' in partial) {
+        if (!next._lockLignesBanque) {
+          next.lignes_banque = Math.round((next.factures_achat + next.factures_vente) * 1.2);
+        }
+        if (!next._lockOpDiv) {
+          next.operations_diverses = Math.round((next.factures_achat + next.factures_vente) * 0.1);
+        }
+      }
+      return next;
+    });
   }, []);
 
   const computedLignes = useMemo(
-    () => calculerLignes(formData),
+    () => calculerLignes({ ...formData, tauxHoraires }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [formData.type_entite, formData.regime_fiscal, formData.regime_tva,
      formData.factures_achat, formData.factures_vente, formData.lignes_banque,
-     formData.immobilisations, formData.effectif]
+     formData.operations_diverses, formData.immobilisations, formData.effectif, tauxHoraires]
   );
 
   const displayLignes = formData.lignes_override || computedLignes;
@@ -638,11 +831,12 @@ export default function DimensionnementWizard({ onBack }) {
       regime_fiscal:     formData.regime_fiscal,
       regime_tva:        formData.regime_tva,
       nb_etablissements: formData.nb_etablissements,
-      factures_achat:    formData.factures_achat,
-      factures_vente:    formData.factures_vente,
-      lignes_banque:     formData.lignes_banque,
-      immobilisations:   formData.immobilisations,
-      effectif:          formData.effectif,
+      factures_achat:      formData.factures_achat,
+      factures_vente:      formData.factures_vente,
+      lignes_banque:       formData.lignes_banque,
+      operations_diverses: formData.operations_diverses,
+      immobilisations:     formData.immobilisations,
+      effectif:            formData.effectif,
       remise_pct:        remise,
       total_ht, total_ht_net, total_ttc,
       statut,
@@ -669,19 +863,26 @@ export default function DimensionnementWizard({ onBack }) {
     }
   };
 
-  const handleSignLdm = async () => {
-    if (!savedId) { await handleSave('accepte'); return; }
-    setSaving('ldm');
+  const handleCreateDocument = async (type) => {
+    if (!formData.client_id) {
+      setMsg({ type: 'err', text: 'Un client CRM est requis pour créer un Devis ou une LDM' });
+      return;
+    }
+    setSaving(type);
     setMsg(null);
     try {
-      const { data } = await api.put(`/dimensionnement/${savedId}/sign-ldm`);
-      setMsg({
-        type: 'ok',
-        text: `✓ LDM signée — ${data.tachesCreees} tâche${data.tachesCreees > 1 ? 's' : ''} injectée${data.tachesCreees > 1 ? 's' : ''} dans le module Tâches`,
-      });
+      let id = savedId;
+      if (!id) {
+        const { data } = await api.post('/dimensionnement', buildPayload('brouillon'));
+        id = data.id;
+        setSavedId(id);
+      } else {
+        await api.put(`/dimensionnement/${id}`, buildPayload('brouillon'));
+      }
+      const { data } = await api.post(`/dimensionnement/${id}/to-${type}`);
+      navigate(type === 'devis' ? `/devis/${data.id}` : `/lettres-mission/${data.id}`);
     } catch (err) {
-      setMsg({ type: 'err', text: err.response?.data?.message || 'Erreur lors de la signature LDM' });
-    } finally {
+      setMsg({ type: 'err', text: err.response?.data?.message || 'Erreur lors de la création' });
       setSaving(null);
     }
   };
@@ -738,6 +939,31 @@ export default function DimensionnementWizard({ onBack }) {
         </div>
       )}
 
+      {/* Blocage wizard — champs critiques manquants */}
+      {wizardBlock && (
+        <div style={{ background: '#fff7ed', border: '1px solid #f59e0b', borderRadius: 8, padding: '14px 18px', marginBottom: 20, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>🔴</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 4 }}>Profil client incomplet — wizard bloqué</div>
+            <div style={{ fontSize: 13, color: '#78350f', marginBottom: 8 }}>
+              Champs critiques manquants : <strong>{wizardBlock.manquants.join(', ')}</strong>
+            </div>
+            <div style={{ fontSize: 12, color: '#92400e' }}>
+              Complétez la fiche client avant de lancer le dimensionnement.
+            </div>
+          </div>
+          <a
+            href={`/clients/${wizardBlock.clientId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-sm"
+            style={{ background: '#f59e0b', color: '#fff', border: 'none', flexShrink: 0, textDecoration: 'none', display: 'flex', alignItems: 'center' }}
+          >
+            Compléter la fiche →
+          </a>
+        </div>
+      )}
+
       {/* Corps */}
       <div className="card">
         <div className="card-body">
@@ -749,9 +975,11 @@ export default function DimensionnementWizard({ onBack }) {
               lignes={displayLignes}
               onChange={updateForm}
               onSave={handleSave}
-              onSignLdm={handleSignLdm}
+              onCreateDevis={() => handleCreateDocument('devis')}
+              onCreateLdm={() => handleCreateDocument('ldm')}
               saving={saving}
               savedId={savedId}
+              tauxHoraires={tauxHoraires}
             />
           )}
         </div>
@@ -770,7 +998,20 @@ export default function DimensionnementWizard({ onBack }) {
           {step < 3 ? (
             <button
               className="btn btn-primary"
-              onClick={() => setStep(s => s + 1)}
+              onClick={async () => {
+                if (step === 1 && formData.client_id) {
+                  try {
+                    const { data } = await api.get(`/clients/${formData.client_id}/wizard-readiness`);
+                    if (!data.ok) {
+                      const labels = { forme_juridique: 'Forme juridique', regime_fiscal: 'Régime fiscal', regime_tva: 'Régime TVA', periodicite_tva: 'Périodicité TVA' };
+                      setWizardBlock({ clientId: formData.client_id, manquants: data.manquants.map(k => labels[k] || k) });
+                      return;
+                    }
+                  } catch { /* continuer en mode dégradé si l'API échoue */ }
+                }
+                setWizardBlock(null);
+                setStep(s => s + 1);
+              }}
             >
               Suivant →
             </button>

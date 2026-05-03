@@ -92,15 +92,55 @@ const LDM_STATUT_LABEL = { brouillon: 'Brouillon', envoyee: 'Envoyée', signee: 
 const ROLE_LABEL = { expert: 'Expert-comptable', chef_mission: 'Chef de mission', collaborateur: 'Collaborateur' };
 
 const REGIME_TVA_LABEL = {
+  // Nouveaux ENUM
+  reel_normal:    'Réel normal',
+  reel_simplifie: 'Réel simplifié',
+  franchise:      'Franchise en base',
+  hors_champ:     'Hors champ TVA',
+  // Legacy (pour rétro-compatibilité affichage)
   mensuel: 'Mensuel', trimestriel: 'Trimestriel',
   non_soumis: 'Non soumis à la TVA', 'Simplifié': 'Régime simplifié',
-  annuel: 'Annuel',
 };
 const REGIME_FISCAL_LABEL = {
+  // Nouveaux ENUM
+  IS:             'IS (Impôt sur les sociétés)',
+  IR_BIC:         'IR — BIC',
+  IR_BNC:         'IR — BNC',
+  IR_translucide: 'IR translucide (SCI)',
+  micro_bic:      'Micro-BIC',
+  micro_bnc:      'Micro-BNC',
+  // Legacy
   ISRS: 'IS Réel Simplifié', ISRN: 'IS Réel Normal',
   SCIC: 'SC IS Créances', SCIS: 'SC IS Simplifié',
   BNC: 'BNC', BICRS: 'BIC Réel Simplifié', BICN: 'BIC Réel Normal',
 };
+const PERIODICITE_TVA_LABEL = {
+  mensuelle:      'Mensuelle',
+  trimestrielle:  'Trimestrielle',
+  annuelle:       'Annuelle',
+  sans_objet:     'Sans objet',
+};
+const ACTIVITE_TYPE_LABEL = {
+  bic:        'BIC (commercial / artisanal)',
+  bnc:        'BNC (libéral)',
+  immobilier: 'Immobilier',
+  holding:    'Holding',
+  autre:      'Autre',
+};
+// Règle de cohérence TVA côté UI
+function periodicitesByRegimeTva(regime) {
+  if (regime === 'reel_normal')    return ['mensuelle','trimestrielle'];
+  if (regime === 'reel_simplifie') return ['annuelle'];
+  if (regime === 'franchise')      return ['sans_objet'];
+  if (regime === 'hors_champ')     return ['sans_objet'];
+  return ['mensuelle','trimestrielle','annuelle','sans_objet'];
+}
+function autoPeriodicite(regime) {
+  if (regime === 'reel_simplifie') return 'annuelle';
+  if (regime === 'franchise')      return 'sans_objet';
+  if (regime === 'hors_champ')     return 'sans_objet';
+  return '';
+}
 
 const TABS = [
   { key: 'overview',   label: "Vue d'ensemble" },
@@ -109,11 +149,13 @@ const TABS = [
   { key: 'taches',     label: 'Tâches' },
   { key: 'timeline',   label: 'Timeline' },
   { key: 'facturation', label: 'Facturation' },
+  { key: 'budget',     label: '⚖️ Budget & Mission' },
   { key: 'documents',  label: 'Documents' },
   { key: 'notes',      label: '📝 Notes' },
   { key: 'contrats',   label: 'Contrats & LDM' },
   { key: 'devis',      label: 'Devis' },
   { key: 'contacts',   label: 'Contacts' },
+  { key: 'banque',     label: '🏦 Banque & Lettrage' },
 ];
 
 // ─── Modal helper ─────────────────────────────────────────────────────────────
@@ -301,13 +343,198 @@ function InteractionModal({ clientId, onSave, onClose }) {
   );
 }
 
+// ─── Bannière migration_anomalie ──────────────────────────────────────────────
+function BanniereAnomalieClient({ client, clientId, onComplete }) {
+  const champs = [];
+  if (!client.forme_juridique) champs.push('Forme juridique');
+  if (!client.regime_fiscal)   champs.push('Régime fiscal');
+  if (!client.regime_tva)      champs.push('Régime TVA');
+  if (!client.periodicite_tva) champs.push('Périodicité TVA');
+  const hasAnomalie = client.migration_anomalie || champs.length > 0;
+  if (!hasAnomalie) return null;
+  return (
+    <div style={{
+      background: '#fff7ed', border: '1px solid #f59e0b', borderRadius: 8,
+      padding: '14px 18px', marginBottom: 20, display: 'flex', gap: 12, alignItems: 'flex-start',
+    }}>
+      <span style={{ fontSize: 20, flexShrink: 0 }}>⚠️</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 4 }}>Profil incomplet</div>
+        {client.migration_anomalie && (
+          <div style={{ fontSize: 12, color: '#78350f', marginBottom: champs.length > 0 ? 4 : 0, fontStyle: 'italic' }}>
+            {client.migration_anomalie}
+          </div>
+        )}
+        {champs.length > 0 && (
+          <div style={{ fontSize: 12, color: '#92400e' }}>
+            Champs critiques manquants : <strong>{champs.join(', ')}</strong>
+          </div>
+        )}
+      </div>
+      <button
+        className="btn btn-sm"
+        style={{ background: '#f59e0b', color: '#fff', border: 'none', flexShrink: 0 }}
+        onClick={onComplete}
+      >
+        Compléter la fiche
+      </button>
+    </div>
+  );
+}
+
+// ─── Modal : édition profil fiscal client ────────────────────────────────────
+function ModalProfilFiscal({ client, clientId, onSaved, onClose }) {
+  const [form, setForm] = useState({
+    forme_juridique:    client.forme_juridique || '',
+    regime_fiscal:      client.regime_fiscal || '',
+    regime_tva:         client.regime_tva || '',
+    periodicite_tva:    client.periodicite_tva || '',
+    presence_salaries:  client.presence_salaries != null ? String(client.presence_salaries) : '',
+    nb_salaries:        client.nb_salaries != null ? String(client.nb_salaries) : '',
+    convention_collective: client.convention_collective || '',
+    activite_type:      client.activite_type || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = k => e => {
+    const val = e.target.value;
+    setForm(f => {
+      const updated = { ...f, [k]: val };
+      // Auto-remplissage périodicité selon régime TVA
+      if (k === 'regime_tva') {
+        const auto = autoPeriodicite(val);
+        if (auto) updated.periodicite_tva = auto;
+      }
+      return updated;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true); setErr('');
+    try {
+      const payload = {};
+      for (const [k, v] of Object.entries(form)) {
+        payload[k] = v === '' ? null : (k === 'presence_salaries' ? Number(v) : k === 'nb_salaries' ? Number(v) : v);
+      }
+      await api.put(`/clients/${clientId}`, payload);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const periodiciteOpts = periodicitesByRegimeTva(form.regime_tva);
+
+  return (
+    <Modal title="Profil fiscal & caractéristiques" onClose={onClose} maxWidth={560}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {err && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{err}</div>}
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Forme juridique</label>
+            <select className="form-control" value={form.forme_juridique} onChange={set('forme_juridique')}>
+              <option value="">— Non renseignée —</option>
+              {['SARL','SAS','SASU','EURL','EI','EIRL','SCI','SCEA','SA','SELARL','SCCV','SCM','SCP','SCA','SC','GIE','Association','Autre'].map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Activité</label>
+            <select className="form-control" value={form.activite_type} onChange={set('activite_type')}>
+              <option value="">— Non renseignée —</option>
+              {Object.entries(ACTIVITE_TYPE_LABEL).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Régime fiscal <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <select className="form-control" value={form.regime_fiscal} onChange={set('regime_fiscal')}>
+              <option value="">— Non renseigné —</option>
+              <option value="IS">IS — Impôt sur les sociétés</option>
+              <option value="IR_BIC">IR — BIC</option>
+              <option value="IR_BNC">IR — BNC</option>
+              <option value="IR_translucide">IR translucide (SCI)</option>
+              <option value="micro_bic">Micro-BIC</option>
+              <option value="micro_bnc">Micro-BNC</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Régime TVA <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <select className="form-control" value={form.regime_tva} onChange={set('regime_tva')}>
+              <option value="">— Non renseigné —</option>
+              <option value="reel_normal">Réel normal</option>
+              <option value="reel_simplifie">Réel simplifié</option>
+              <option value="franchise">Franchise en base</option>
+              <option value="hors_champ">Hors champ TVA</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Périodicité TVA <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <select className="form-control" value={form.periodicite_tva} onChange={set('periodicite_tva')}
+              disabled={['reel_simplifie','franchise','hors_champ'].includes(form.regime_tva)}>
+              <option value="">— Non renseignée —</option>
+              {Object.entries(PERIODICITE_TVA_LABEL)
+                .filter(([k]) => periodiciteOpts.includes(k))
+                .map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Salariés</label>
+            <select className="form-control" value={form.presence_salaries} onChange={set('presence_salaries')}>
+              <option value="">— Non renseigné —</option>
+              <option value="1">Oui</option>
+              <option value="0">Non</option>
+            </select>
+          </div>
+          {form.presence_salaries === '1' && (
+            <div className="form-group">
+              <label className="form-label">Nombre de salariés</label>
+              <input className="form-control" type="number" min="1" value={form.nb_salaries} onChange={set('nb_salaries')} />
+            </div>
+          )}
+        </div>
+
+        {form.presence_salaries === '1' && (
+          <div className="form-group">
+            <label className="form-label">Convention collective</label>
+            <input className="form-control" value={form.convention_collective} onChange={set('convention_collective')} placeholder="Ex: Convention collective du bâtiment" />
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Annuler</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Sauvegarde…' : 'Enregistrer'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Tab: Vue d'ensemble ──────────────────────────────────────────────────────
 function TabOverview({ client, attributions, factures, taches, missions, clientId, currentUser, onClientSaved }) {
   const isExpert = currentUser?.role === 'expert';
+  const isManager = ['expert','chef_mission'].includes(currentUser?.role) ||
+    ['expert_comptable','chef_de_groupe','chef_de_mission'].includes(currentUser?.role_metier);
   const [sensitiveUnlocked, setSensitiveUnlocked] = useState(false);
   const [sensitiveContent, setSensitiveContent] = useState('');
   const [sensitiveLoading, setSensitiveLoading] = useState(false);
   const [sensitiveErr, setSensitiveErr] = useState('');
+  const [showProfilFiscal, setShowProfilFiscal] = useState(false);
 
   const caFacture = factures.filter((f) => f.statut !== 'brouillon' && f.statut !== 'annulee')
     .reduce((s, f) => s + parseFloat(f.totalHT || 0), 0);
@@ -336,6 +563,23 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
 
   return (
     <div>
+      {/* Bannière anomalie */}
+      {isManager && (
+        <BanniereAnomalieClient
+          client={client}
+          clientId={clientId}
+          onComplete={() => setShowProfilFiscal(true)}
+        />
+      )}
+      {showProfilFiscal && (
+        <ModalProfilFiscal
+          client={client}
+          clientId={clientId}
+          onSaved={onClientSaved}
+          onClose={() => setShowProfilFiscal(false)}
+        />
+      )}
+
       {/* KPIs */}
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 24 }}>
         <div className="kpi-card">
@@ -371,7 +615,17 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
               <tbody>
                 {[
                   ['Dénomination', client.nom],
-                  client.raison_sociale && ['Dirigeant', client.raison_sociale],
+                  (client.nom_dirigeant || client.prenom_dirigeant || client.raison_sociale) && ['Dirigeant',
+                    <span key="dir">
+                      {(client.prenom_dirigeant || client.nom_dirigeant)
+                        ? `${client.prenom_dirigeant || ''} ${client.nom_dirigeant || ''}`.trim()
+                        : client.raison_sociale
+                      }
+                      {!!client.pa_inscrit && (
+                        <span key="pa" style={{ marginLeft: 8, fontSize: 11, background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>PA</span>
+                      )}
+                    </span>
+                  ],
                   client.forme_juridique && ['Forme juridique', client.forme_juridique],
                   ['SIREN', client.siren || '—'],
                   client.siret && ['SIRET', client.siret],
@@ -395,35 +649,67 @@ function TabOverview({ client, attributions, factures, taches, missions, clientI
 
         {/* Paramètres comptables — expanded */}
         <div className="card">
-          <div className="card-header" style={{ justifyContent: 'space-between' }}>
+          <div className="card-header" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span className="card-title">Paramètres comptables</span>
-            {isExpert && (
-              <select
-                className="form-control"
-                style={{ width: 'auto', fontSize: 12, padding: '3px 8px' }}
-                value={client.complexite || 'standard'}
-                onChange={async (e) => {
-                  await api.put(`/clients/${clientId}`, { complexite: e.target.value });
-                  onClientSaved();
-                }}
-              >
-                <option value="simple">Simple ×0.8</option>
-                <option value="standard">Standard ×1.0</option>
-                <option value="complexe">Complexe ×1.3</option>
-                <option value="expert">Expert ×1.6</option>
-              </select>
-            )}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {isManager && (
+                <button className="btn btn-ghost btn-sm" style={{ fontSize: 12 }} onClick={() => setShowProfilFiscal(true)}>
+                  ✏️ Modifier le profil fiscal
+                </button>
+              )}
+              {isExpert && (
+                <select
+                  className="form-control"
+                  style={{ width: 'auto', fontSize: 12, padding: '3px 8px' }}
+                  value={client.complexite || 'standard'}
+                  onChange={async (e) => {
+                    await api.put(`/clients/${clientId}`, { complexite: e.target.value });
+                    onClientSaved();
+                  }}
+                >
+                  <option value="simple">Simple ×0.8</option>
+                  <option value="standard">Standard ×1.0</option>
+                  <option value="complexe">Complexe ×1.3</option>
+                  <option value="expert">Expert ×1.6</option>
+                </select>
+              )}
+            </div>
           </div>
           <div className="card-body">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {[
                   ['Type d\'entité', client.type || '—'],
-                  ['Régime TVA', REGIME_TVA_LABEL[client.regime_tva] || client.regime_tva || '—'],
-                  ['Régime fiscal', REGIME_FISCAL_LABEL[client.regime_fiscal] || client.regime_fiscal || REGIME_LABEL[client.regime] || '—'],
+                  ['Forme juridique',
+                    client.forme_juridique
+                      ? client.forme_juridique
+                      : <span style={{ color: 'var(--danger)', fontSize: 11 }}>Non renseignée</span>
+                  ],
+                  ['Régime fiscal',
+                    client.regime_fiscal
+                      ? REGIME_FISCAL_LABEL[client.regime_fiscal] || client.regime_fiscal
+                      : <span style={{ color: 'var(--danger)', fontSize: 11 }}>Non renseigné</span>
+                  ],
+                  ['Régime TVA',
+                    client.regime_tva
+                      ? REGIME_TVA_LABEL[client.regime_tva] || client.regime_tva
+                      : <span style={{ color: 'var(--danger)', fontSize: 11 }}>Non renseigné</span>
+                  ],
+                  ['Périodicité TVA',
+                    client.periodicite_tva
+                      ? PERIODICITE_TVA_LABEL[client.periodicite_tva] || client.periodicite_tva
+                      : <span style={{ color: 'var(--danger)', fontSize: 11 }}>Non renseignée</span>
+                  ],
+                  client.activite_type && ['Activité', ACTIVITE_TYPE_LABEL[client.activite_type] || client.activite_type],
+                  client.presence_salaries != null && ['Salariés',
+                    client.presence_salaries
+                      ? `Oui${client.nb_salaries ? ` (${client.nb_salaries})` : ''}`
+                      : 'Non'
+                  ],
+                  client.convention_collective && ['Convention', client.convention_collective],
                   client.capital != null && ['Capital', fmt(client.capital)],
                   client.code_ape && ['Code APE', client.code_ape],
-                  client.activite && ['Activité', client.activite],
+                  client.activite && ['Activité libre', client.activite],
                   client.date_cloture && ['Date de clôture', fmtDate(client.date_cloture)],
                   client.groupe && ['Groupe', client.groupe],
                   client.complexite && ['Complexité', { simple: 'Simple ×0.8', standard: 'Standard ×1.0', complexe: 'Complexe ×1.3', expert: 'Expert ×1.6' }[client.complexite]],
@@ -1931,6 +2217,470 @@ function RevisionModal({ contratId, contrat, onSave, onClose }) {
   );
 }
 
+// ─── Tab: Budget & Mission ────────────────────────────────────────────────────
+const PERIODE_LABELS = { mensuelle: 'Mensuelle', trimestrielle: 'Trimestrielle', semestrielle: 'Semestrielle', annuelle: 'Annuelle', ponctuelle: 'Ponctuelle' };
+const PERIODE_OPTIONS = ['mensuelle', 'trimestrielle', 'semestrielle', 'annuelle', 'ponctuelle'];
+
+const PROFIL_CONFIG = [
+  { key: 'collab', label: 'Collaborateur',      color: '#3b82f6', bg: '#eff6ff' },
+  { key: 'chef',   label: 'Chef de mission',    color: '#8b5cf6', bg: '#f5f3ff' },
+  { key: 'expert', label: 'Expert-comptable',   color: '#0f766e', bg: '#f0fdfa' },
+];
+
+function BarreProgression({ consomme, budget, color, bg, seuilAlerte }) {
+  const pct = budget > 0 ? Math.min(Math.round(consomme / budget * 100), 200) : 0;
+  const enAlerte = budget > 0 && consomme / budget * 100 >= (100 + seuilAlerte);
+  const enApproche = budget > 0 && consomme / budget * 100 >= (100 - 10) && !enAlerte;
+  const barColor = enAlerte ? '#dc2626' : enApproche ? '#f59e0b' : color;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 3 }}>
+        <span>{(consomme / 60).toFixed(1)}h consommées</span>
+        <span style={{ fontWeight: enAlerte ? 700 : 400, color: enAlerte ? '#dc2626' : '#64748b' }}>
+          {budget > 0 ? `${pct}%` : '—'}
+        </span>
+      </div>
+      <div style={{ height: 7, borderRadius: 4, background: '#e2e8f0', overflow: 'hidden' }}>
+        {budget > 0 && (
+          <div style={{
+            height: '100%',
+            width: `${Math.min(pct, 100)}%`,
+            background: barColor,
+            borderRadius: 4,
+            transition: 'width .4s',
+          }} />
+        )}
+      </div>
+      {enAlerte && (
+        <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, marginTop: 3 }}>
+          Dépassement de {(consomme / 60 - budget / 60).toFixed(1)}h — vérifier la rentabilité
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabMissionBudget({ ldm, taches, client, clientId, currentUser, onSaved }) {
+  const isManager = ['expert', 'chef_mission'].includes(currentUser?.role);
+  const navigate = useNavigate();
+
+  const [data, setData]     = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Formulaire manuel (si pas de LDM)
+  const [form, setForm] = useState({
+    budget_temps_h:          client?.budget_temps_h  ?? '',
+    budget_honoraires:       client?.budget_honoraires ?? '',
+    periodicite_facturation: client?.periodicite_facturation ?? '',
+    date_debut_mission:      client?.date_debut_mission ? client.date_debut_mission.split('T')[0] : '',
+    date_fin_mission:        client?.date_fin_mission  ? client.date_fin_mission.split('T')[0]  : '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved]   = useState(false);
+  const [err, setErr]       = useState('');
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  useEffect(() => {
+    api.get(`/clients/${clientId}/budget-temps-detail`)
+      .then(r => setData(r.data))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true); setErr(''); setSaved(false);
+    try {
+      await api.put(`/clients/${clientId}/mission-budget`, form);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      if (onSaved) onSaved();
+    } catch (er) {
+      setErr(er.response?.data?.message || 'Erreur lors de la sauvegarde');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>Chargement…</div>;
+
+  const activeLdm = data?.ldm;
+  const consomme  = data?.consomme  || { collab: 0, chef: 0, expert: 0 };
+  const honFac    = data?.honoraires || { budget: 0, facture_ytd: 0, facture_total: 0 };
+  const seuil     = data?.seuil_alerte || 20;
+  const detail    = data?.detail || [];
+
+  const budgetTotal = activeLdm
+    ? (activeLdm.budget_minutes_collab || 0) + (activeLdm.budget_minutes_chef || 0) + (activeLdm.budget_minutes_expert || 0)
+    : Math.round((parseFloat(client?.budget_temps_h || 0)) * 60);
+  const consommeTotal = (consomme.collab || 0) + (consomme.chef || 0) + (consomme.expert || 0);
+
+  const fmtH = m => `${(m / 60).toFixed(1)}h`;
+  const fmtEur = v => Number(v || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0 }) + ' €';
+
+  const budgetParProfil = {
+    collab: activeLdm?.budget_minutes_collab || 0,
+    chef:   activeLdm?.budget_minutes_chef   || 0,
+    expert: activeLdm?.budget_minutes_expert || 0,
+  };
+
+  // Honoraires : alerte si facturé < 90% du budget annuel (fin d'année imminente)
+  const tauxHon = honFac.budget > 0 ? honFac.facture_ytd / honFac.budget * 100 : null;
+  const honEnRetard = tauxHon !== null && tauxHon < 80;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 720 }}>
+
+      {/* ── Bandeau source ── */}
+      {activeLdm ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 9 }}>
+          <span style={{ fontSize: 16 }}>✅</span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: '#15803d' }}>LDM active — {activeLdm.numero}</span>
+            <span style={{ fontSize: 12, color: '#4ade80', marginLeft: 8 }}>{PERIODE_LABELS[activeLdm.modaliteFacturation] || activeLdm.modaliteFacturation}</span>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/lettres-mission/${activeLdm.id}`)}>
+            Ouvrir LDM
+          </button>
+        </div>
+      ) : (
+        <div style={{ padding: '10px 14px', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 9, fontSize: 13, color: '#92400e' }}>
+          Aucune LDM active — budget issu de la saisie manuelle. Ces données sont modifiables ci-dessous.
+        </div>
+      )}
+
+      {/* ── Budget temps par intervenant ── */}
+      <div className="card">
+        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 16, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
+          Suivi temps par intervenant
+          <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 10 }}>
+            Social et juridique exclus (forfaitaires)
+          </span>
+        </div>
+
+        {/* Total */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
+          {[
+            { label: 'Budget total', value: budgetTotal > 0 ? fmtH(budgetTotal) : '—', color: '#374151', bg: '#f8fafc' },
+            { label: 'Consommé', value: fmtH(consommeTotal), color: consommeTotal > budgetTotal && budgetTotal > 0 ? '#dc2626' : '#374151', bg: '#f8fafc' },
+            { label: 'Honoraires budget', value: fmtEur(honFac.budget), color: '#374151', bg: '#f8fafc' },
+          ].map(s => (
+            <div key={s.label} style={{ padding: '10px 12px', borderRadius: 8, background: s.bg, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.4px' }}>{s.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Barres par profil */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {PROFIL_CONFIG.map(({ key, label, color, bg }) => {
+            const budget  = budgetParProfil[key] || 0;
+            const conso   = consomme[key] || 0;
+            const personnes = detail.filter(d => {
+              if (key === 'expert') return d.role_metier === 'expert_comptable';
+              if (key === 'chef')   return ['chef_de_groupe','chef_de_mission'].includes(d.role_metier);
+              return !['expert_comptable','chef_de_groupe','chef_de_mission'].includes(d.role_metier);
+            });
+            return (
+              <div key={key} style={{ padding: '12px 14px', borderRadius: 9, background: bg, border: `1px solid ${color}22` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, color }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>
+                    {fmtH(conso)}
+                    {budget > 0 && <span style={{ fontWeight: 400, color: '#64748b', fontSize: 12 }}> / {fmtH(budget)}</span>}
+                    {budget === 0 && <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 11 }}> (budget non défini)</span>}
+                  </span>
+                </div>
+                <BarreProgression consomme={conso} budget={budget} color={color} bg={bg} seuilAlerte={seuil} />
+                {personnes.length > 0 && (
+                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {personnes.map(p => (
+                      <span key={p.nom} style={{ fontSize: 11, padding: '2px 7px', borderRadius: 20, background: `${color}18`, color }}>
+                        {p.prenom} {p.nom} · {fmtH(p.minutes_total)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Suivi honoraires ── */}
+      <div className="card">
+        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
+          Suivi honoraires
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 }}>
+          {[
+            { label: 'Budget annuel', value: fmtEur(honFac.budget) },
+            { label: `Facturé ${new Date().getFullYear()}`, value: fmtEur(honFac.facture_ytd), color: honEnRetard ? '#dc2626' : '#15803d' },
+            { label: 'Facturé total', value: fmtEur(honFac.facture_total) },
+          ].map(s => (
+            <div key={s.label} style={{ padding: '10px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.4px' }}>{s.label}</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: s.color || '#374151' }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+        {tauxHon !== null && (
+          <div style={{ height: 7, borderRadius: 4, background: '#e2e8f0', overflow: 'hidden', marginBottom: 6 }}>
+            <div style={{ height: '100%', width: `${Math.min(tauxHon, 100)}%`, background: honEnRetard ? '#dc2626' : '#15803d', borderRadius: 4, transition: 'width .4s' }} />
+          </div>
+        )}
+        {tauxHon !== null && (
+          <div style={{ fontSize: 11, color: '#64748b' }}>
+            {tauxHon.toFixed(0)}% du budget annuel facturé sur {new Date().getFullYear()}
+            {honEnRetard && <span style={{ color: '#dc2626', fontWeight: 600, marginLeft: 6 }}>— retard de facturation</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Formulaire manuel (si pas de LDM) ── */}
+      {!activeLdm && isManager && (
+        <div className="card">
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
+            Paramètres manuels (en l'absence de LDM)
+          </div>
+          <form onSubmit={handleSave}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px', marginBottom: 14 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Budget temps total (heures)</label>
+                <input type="number" min="0" step="0.5" placeholder="42" className="form-control" value={form.budget_temps_h} onChange={set('budget_temps_h')} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Budget honoraires (€/an)</label>
+                <input type="number" min="0" step="1" placeholder="1500" className="form-control" value={form.budget_honoraires} onChange={set('budget_honoraires')} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Périodicité de facturation</label>
+                <select className="form-control" value={form.periodicite_facturation} onChange={set('periodicite_facturation')}>
+                  <option value="">— Sélectionner —</option>
+                  {PERIODE_OPTIONS.map(p => <option key={p} value={p}>{PERIODE_LABELS[p]}</option>)}
+                </select>
+              </div>
+              <div />
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Date de début de mission</label>
+                <input type="date" className="form-control" value={form.date_debut_mission} onChange={set('date_debut_mission')} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Date de fin <span style={{ fontWeight: 400 }}>(opt.)</span></label>
+                <input type="date" className="form-control" value={form.date_fin_mission} onChange={set('date_fin_mission')} />
+              </div>
+            </div>
+            {err && <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 10 }}>{err}</div>}
+            <button type="submit" className="btn btn-primary" disabled={saving} style={{ minWidth: 140 }}>
+              {saving ? 'Enregistrement…' : saved ? '✓ Enregistré !' : '💾 Enregistrer'}
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab: Banque & Lettrage ───────────────────────────────────────────────────
+function TabBanque({ clientId }) {
+  const navigate = useNavigate();
+  const [connexions, setConnexions] = useState([]);
+  const [mouvements, setMouvements] = useState([]);
+  const [comptes, setComptes]       = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [syncing, setSyncing]       = useState(false);
+
+  const STATUS_COLOR = {
+    non_lettre: { bg: '#fff7ed', color: '#c2410c', label: 'À lettrer' },
+    lettre:     { bg: '#f0fdf4', color: '#15803d', label: 'Lettré' },
+    ignore:     { bg: '#f8fafc', color: '#64748b', label: 'Ignoré' },
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api.get(`/powens/connexions`).catch(() => ({ data: [] })),
+      api.get(`/powens/comptes?client_id=${clientId}`).catch(() => ({ data: [] })),
+      api.get(`/powens/mouvements?client_id=${clientId}&limit=50`).catch(() => ({ data: [] })),
+    ]).then(([cx, cp, mv]) => {
+      setConnexions((cx.data || []).filter(c => String(c.client_id) === String(clientId)));
+      setComptes(cp.data || []);
+      setMouvements(mv.data || []);
+    }).finally(() => setLoading(false));
+  }, [clientId]);
+
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const r = await api.post('/powens/sync', { client_id: clientId });
+      const [cx, cp, mv] = await Promise.all([
+        api.get(`/powens/connexions`).catch(() => ({ data: [] })),
+        api.get(`/powens/comptes?client_id=${clientId}`).catch(() => ({ data: [] })),
+        api.get(`/powens/mouvements?client_id=${clientId}&limit=50`).catch(() => ({ data: [] })),
+      ]);
+      setConnexions((cx.data || []).filter(c => String(c.client_id) === String(clientId)));
+      setComptes(cp.data || []);
+      setMouvements(mv.data || []);
+      alert(r.data.message);
+    } catch (e) {
+      alert(e.response?.data?.message || 'Erreur sync');
+    } finally { setSyncing(false); }
+  }
+
+  const nbNonLettre = mouvements.filter(m => m.statut_lettrage === 'non_lettre').length;
+  const nbLettre    = mouvements.filter(m => m.statut_lettrage === 'lettre').length;
+  const soldeTotal  = comptes.reduce((s, c) => s + parseFloat(c.solde || 0), 0);
+
+  function fmtMoney(v) {
+    const n = parseFloat(v);
+    return isNaN(n) ? '—' : n.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' €';
+  }
+  function fmtDate(d) {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('fr-FR');
+  }
+
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Chargement…</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Header actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>Comptes bancaires connectés</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={handleSync} disabled={syncing || connexions.length === 0}
+            style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 13, opacity: connexions.length === 0 ? 0.4 : 1 }}>
+            {syncing ? '⏳ Sync…' : '🔄 Synchroniser'}
+          </button>
+          <button onClick={() => navigate(`/lettrage?client_id=${clientId}`)}
+            style={{ padding: '6px 14px', borderRadius: 7, border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            🏦 Gérer le lettrage
+          </button>
+        </div>
+      </div>
+
+      {connexions.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, background: '#f8fafc', borderRadius: 12, border: '2px dashed #e2e8f0' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🏦</div>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Aucun compte bancaire connecté</div>
+          <div style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Connectez la banque de ce client pour importer les transactions automatiquement.</div>
+          <button onClick={() => navigate(`/lettrage?client_id=${clientId}`)}
+            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+            Connecter une banque
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Stat cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+            {[
+              { label: 'Comptes', value: comptes.length, color: '#3b82f6', bg: '#eff6ff' },
+              { label: 'Solde total', value: fmtMoney(soldeTotal), color: soldeTotal >= 0 ? '#15803d' : '#dc2626', bg: soldeTotal >= 0 ? '#f0fdf4' : '#fff5f5' },
+              { label: 'À lettrer', value: nbNonLettre, color: nbNonLettre > 0 ? '#c2410c' : '#15803d', bg: nbNonLettre > 0 ? '#fff7ed' : '#f0fdf4' },
+              { label: 'Lettrés', value: nbLettre, color: '#15803d', bg: '#f0fdf4' },
+            ].map(s => (
+              <div key={s.label} style={{ padding: '12px 16px', borderRadius: 10, background: s.bg }}>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px' }}>{s.label}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Comptes */}
+          {comptes.length > 0 && (
+            <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', fontWeight: 600, fontSize: 13 }}>Comptes</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Banque</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>IBAN</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 600, color: '#374151' }}>Solde</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Sync</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comptes.map(c => (
+                    <tr key={c.id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px 14px' }}>{c.banque || c.nom || '—'}</td>
+                      <td style={{ padding: '8px 14px', color: '#64748b', fontFamily: 'monospace', fontSize: 12 }}>
+                        {c.iban ? `…${c.iban.slice(-4)}` : '—'}
+                      </td>
+                      <td style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 700, color: parseFloat(c.solde) >= 0 ? '#15803d' : '#dc2626' }}>
+                        {fmtMoney(c.solde)}
+                      </td>
+                      <td style={{ padding: '8px 14px', color: '#94a3b8', fontSize: 12 }}>
+                        {c.derniere_sync ? fmtDate(c.derniere_sync) : 'Jamais'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Dernières transactions */}
+          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Dernières transactions</span>
+              {nbNonLettre > 0 && (
+                <span style={{ padding: '2px 10px', borderRadius: 20, background: '#fff7ed', color: '#c2410c', fontSize: 12, fontWeight: 600 }}>
+                  {nbNonLettre} à lettrer
+                </span>
+              )}
+            </div>
+            {mouvements.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                Aucune transaction — lancez une synchronisation.
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Date</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Libellé</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'right', fontWeight: 600, color: '#374151' }}>Montant</th>
+                    <th style={{ padding: '8px 14px', textAlign: 'center', fontWeight: 600, color: '#374151' }}>Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mouvements.slice(0, 20).map((m, i) => {
+                    const sc = STATUS_COLOR[m.statut_lettrage] || STATUS_COLOR.non_lettre;
+                    const montant = parseFloat(m.montant);
+                    return (
+                      <tr key={m.id} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                        <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', color: '#374151' }}>{fmtDate(m.date_operation)}</td>
+                        <td style={{ padding: '7px 14px', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.libelle_simplifie || m.libelle || '—'}
+                        </td>
+                        <td style={{ padding: '7px 14px', textAlign: 'right', fontWeight: 700, color: montant >= 0 ? '#15803d' : '#dc2626', whiteSpace: 'nowrap' }}>
+                          {montant >= 0 ? '+' : ''}{fmtMoney(montant)}
+                        </td>
+                        <td style={{ padding: '7px 14px', textAlign: 'center' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 20, background: sc.bg, color: sc.color, fontSize: 11, fontWeight: 600 }}>
+                            {sc.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {mouvements.length > 20 && (
+              <div style={{ padding: '10px 14px', textAlign: 'center', borderTop: '1px solid #f1f5f9' }}>
+                <button onClick={() => navigate(`/lettrage?client_id=${clientId}`)}
+                  style={{ fontSize: 13, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500 }}>
+                  Voir les {mouvements.length} transactions →
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Tab: Devis & LDM ────────────────────────────────────────────────────────
 function TabDevisLdm({ devis, ldm, clientId }) {
   const navigate = useNavigate();
@@ -1941,7 +2691,7 @@ function TabDevisLdm({ devis, ldm, clientId }) {
           <span className="card-title">Devis ({devis.length})</span>
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => navigate(`/devis/nouveau?client_id=${clientId}`)}
+            onClick={() => navigate(`/devis/new?client_id=${clientId}`)}
           >
             + Nouveau devis
           </button>
@@ -2358,8 +3108,16 @@ export default function ClientCockpit() {
 
             {/* Sub-info row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>
-              {client.raison_sociale && (
-                <span title="Dirigeant">{client.raison_sociale}</span>
+              {(client.nom_dirigeant || client.prenom_dirigeant || client.raison_sociale) && (
+                <span title="Dirigeant">
+                  {(client.prenom_dirigeant || client.nom_dirigeant)
+                    ? `${client.prenom_dirigeant || ''} ${client.nom_dirigeant || ''}`.trim()
+                    : client.raison_sociale
+                  }
+                  {!!client.pa_inscrit && (
+                    <span style={{ marginLeft: 6, fontSize: 10, background: 'rgba(34,197,94,0.25)', color: '#4ade80', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>PA</span>
+                  )}
+                </span>
               )}
               {client.siren && <span>SIREN {client.siren}</span>}
               {client.siret && !client.siren && <span>SIRET {client.siret}</span>}
@@ -2407,7 +3165,7 @@ export default function ClientCockpit() {
             <button
               className="btn btn-primary btn-sm"
               style={{ fontSize: 12 }}
-              onClick={() => navigate(`/devis/nouveau?client_id=${clientId}`)}
+              onClick={() => navigate(`/devis/new?client_id=${clientId}`)}
             >
               📄 Devis
             </button>
@@ -2498,6 +3256,17 @@ export default function ClientCockpit() {
 
         {tab === 'facturation' && <TabFacturation factures={factures} ldm={ldm} />}
 
+        {tab === 'budget' && (
+          <TabMissionBudget
+            ldm={ldm}
+            taches={taches}
+            client={client}
+            clientId={clientId}
+            currentUser={user}
+            onSaved={load}
+          />
+        )}
+
         {tab === 'documents' && (
           <div className="card">
             <div className="card-body" style={{ padding: 0 }}>
@@ -2527,6 +3296,7 @@ export default function ClientCockpit() {
         {tab === 'devis' && <TabDevisLdm devis={devis} ldm={ldm} clientId={clientId} />}
 
         {tab === 'contacts' && <TabContacts contacts={contacts} />}
+        {tab === 'banque' && <TabBanque clientId={clientId} />}
       </div>
 
       {/* ── Global quick-action modals ────────────────────────────────────── */}

@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Collaborateurs from './pages/Collaborateurs';
 import Clients from './pages/Clients';
+import ClientsACompleter from './pages/ClientsACompleter';
 import Attributions from './pages/Attributions';
 import ClientCockpit from './pages/ClientCockpit';
 import Taches from './pages/Taches';
@@ -20,6 +21,7 @@ import Relances from './pages/Relances';
 import Rentabilite from './pages/Rentabilite';
 import ChargeTravail from './pages/ChargeTravail';
 import MonEspace from './pages/MonEspace';
+import MaJournee from './pages/MaJournee';
 import HubCommunication from './pages/HubCommunication';
 import Planning from './pages/Planning';
 import Parametres from './pages/Parametres';
@@ -33,9 +35,17 @@ import TiimeImport from './pages/TiimeImport';
 import ClientIntake from './pages/ClientIntake';
 import Absences from './pages/Absences';
 import Rapports from './pages/Rapports';
+import Cabinet from './pages/Cabinet';
+import MonPortefeuille from './pages/MonPortefeuille';
 import DevisWizard from './pages/DevisWizard';
 import DevisDetail from './pages/DevisDetail';
 import LDMDetail from './pages/LDMDetail';
+import Appels from './pages/Appels';
+import Contrats from './pages/Contrats';
+import ProspectsPipeline from './pages/ProspectsPipeline';
+import FeuilleDeTTemps from './pages/FeuilleDeTTemps';
+import ValidationTemps from './pages/ValidationTemps';
+import Lettrage from './pages/Lettrage';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -67,12 +77,16 @@ function AppRoutes() {
       {/* CRM principal */}
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
       <Route path="/briefing" element={<ProtectedRoute><AppLayout><MorningBriefing /></AppLayout></ProtectedRoute>} />
-      <Route path="/mon-espace" element={<ProtectedRoute><AppLayout><MonEspace /></AppLayout></ProtectedRoute>} />
+      <Route path="/ma-journee" element={<ProtectedRoute><AppLayout><MaJournee /></AppLayout></ProtectedRoute>} />
+      <Route path="/mon-espace" element={<Navigate to="/ma-journee" replace />} />
       <Route path="/clients" element={<ProtectedRoute><AppLayout><Clients /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/a-completer" element={<ProtectedRoute><AppLayout><ClientsACompleter /></AppLayout></ProtectedRoute>} />
       <Route path="/clients/:id" element={<ProtectedRoute><AppLayout><ClientCockpit /></AppLayout></ProtectedRoute>} />
       <Route path="/attributions" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
-      <Route path="/portefeuille" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
+      <Route path="/portefeuille" element={<ProtectedRoute><AppLayout><MonPortefeuille /></AppLayout></ProtectedRoute>} />
       <Route path="/taches" element={<ProtectedRoute><AppLayout><Taches /></AppLayout></ProtectedRoute>} />
+      <Route path="/feuille-temps" element={<ProtectedRoute><AppLayout><FeuilleDeTTemps /></AppLayout></ProtectedRoute>} />
+      <Route path="/validation-temps" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ValidationTemps /></AppLayout></ProtectedRoute>} />
       <Route path="/missions" element={<ProtectedRoute><AppLayout><Missions /></AppLayout></ProtectedRoute>} />
       <Route path="/travaux" element={<ProtectedRoute><AppLayout><Travaux /></AppLayout></ProtectedRoute>} />
       <Route path="/planning" element={<ProtectedRoute><AppLayout><Planning /></AppLayout></ProtectedRoute>} />
@@ -83,10 +97,12 @@ function AppRoutes() {
       <Route path="/devis/new" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><DevisWizard /></AppLayout></ProtectedRoute>} />
       <Route path="/devis/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><DevisDetail /></AppLayout></ProtectedRoute>} />
       <Route path="/factures" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Factures /></AppLayout></ProtectedRoute>} />
+      <Route path="/lettrage" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Lettrage /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LettresMission /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LDMDetail /></AppLayout></ProtectedRoute>} />
-      <Route path="/prospects" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Prospects /></AppLayout></ProtectedRoute>} />
-      <Route path="/pipeline" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Pipeline /></AppLayout></ProtectedRoute>} />
+      <Route path="/prospects-pipeline" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ProspectsPipeline /></AppLayout></ProtectedRoute>} />
+      <Route path="/prospects" element={<Navigate to="/prospects-pipeline?tab=prospects" replace />} />
+      <Route path="/pipeline"  element={<Navigate to="/prospects-pipeline?tab=pipeline"  replace />} />
       <Route path="/dimensionnement" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Dimensionnement /></AppLayout></ProtectedRoute>} />
       <Route path="/relances" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Relances /></AppLayout></ProtectedRoute>} />
       <Route path="/rentabilite" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Rentabilite /></AppLayout></ProtectedRoute>} />
@@ -97,6 +113,8 @@ function AppRoutes() {
       <Route path="/tiime-import" element={<ProtectedRoute roles={['expert']}><AppLayout><TiimeImport /></AppLayout></ProtectedRoute>} />
       <Route path="/absences" element={<ProtectedRoute><AppLayout><Absences /></AppLayout></ProtectedRoute>} />
       <Route path="/rapports" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Rapports /></AppLayout></ProtectedRoute>} />
+      <Route path="/appels" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Appels /></AppLayout></ProtectedRoute>} />
+      <Route path="/contrats" element={<Navigate to="/lettres-mission?tab=contrats" replace />} />
       <Route path="/intake" element={<ClientIntake />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

@@ -8,11 +8,13 @@ router.get('/kpis', verifyToken, async (req, res) => {
     const isExpertOrChef = ['expert', 'chef_mission'].includes(req.user.role);
 
     // ── Clients & prospects ───────────────────────────────────────────────────
+    // Note : la table clients ne contient que des clients actifs (pas de prospects).
+    // Les prospects sont dans la table prospects séparée.
     const [[{ clientsActifs }]] = await pool.query(
-      "SELECT COUNT(*) AS clientsActifs FROM clients WHERE actif = 1 AND type = 'client'"
+      "SELECT COUNT(*) AS clientsActifs FROM clients WHERE actif = 1"
     );
     const [[{ prospects }]] = await pool.query(
-      "SELECT COUNT(*) AS prospects FROM clients WHERE actif = 1 AND type = 'prospect'"
+      "SELECT COUNT(*) AS prospects FROM prospects WHERE statut NOT IN ('converti','perdu')"
     );
 
     // ── Chiffre d'affaires ────────────────────────────────────────────────────
@@ -47,7 +49,7 @@ router.get('/kpis', verifyToken, async (req, res) => {
     const userFilter = isExpertOrChef ? '' : `AND utilisateur_id = ${pool.escape(req.user.id)}`;
     const [[tachesStats]] = await pool.query(`
       SELECT
-        SUM(CASE WHEN statut IN ('a_faire','en_cours') AND dateEcheance < CURDATE() THEN 1 ELSE 0 END) AS tachesEnRetard,
+        SUM(CASE WHEN statut IN ('a_faire','en_cours') AND date_echeance < CURDATE() THEN 1 ELSE 0 END) AS tachesEnRetard,
         SUM(CASE WHEN statut = 'a_faire' THEN 1 ELSE 0 END) AS tachesAFaire,
         SUM(CASE WHEN statut = 'en_cours' THEN 1 ELSE 0 END) AS tachesEnCours,
         SUM(CASE WHEN statut = 'termine' AND MONTH(updatedAt) = MONTH(NOW()) THEN 1 ELSE 0 END) AS tachesTermineesMois
@@ -81,9 +83,9 @@ router.get('/kpis', verifyToken, async (req, res) => {
        FROM taches t
        LEFT JOIN clients c ON t.client_id = c.id
        LEFT JOIN utilisateurs u ON t.utilisateur_id = u.id
-       WHERE t.statut != 'termine' AND t.dateEcheance BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+       WHERE t.statut != 'termine' AND t.date_echeance BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
        ${userFilter}
-       ORDER BY t.priorite DESC, t.dateEcheance LIMIT 10`
+       ORDER BY t.priorite DESC, t.date_echeance LIMIT 10`
     );
 
     // ── Clients récents ───────────────────────────────────────────────────────
