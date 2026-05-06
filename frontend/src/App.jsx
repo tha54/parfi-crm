@@ -13,7 +13,7 @@ import Devis from './pages/Devis';
 import Factures from './pages/Factures';
 import LettresMission from './pages/LettresMission';
 import Prospects from './pages/Prospects';
-import Dimensionnement from './pages/Dimensionnement';
+import Chiffrage from './pages/Chiffrage';
 import Pipeline from './pages/Pipeline';
 import Missions from './pages/Missions';
 import Travaux from './pages/Travaux';
@@ -37,11 +37,9 @@ import Absences from './pages/Absences';
 import Rapports from './pages/Rapports';
 import Cabinet from './pages/Cabinet';
 import MonPortefeuille from './pages/MonPortefeuille';
-import DevisWizard from './pages/DevisWizard';
 import DevisDetail from './pages/DevisDetail';
 import LDMDetail from './pages/LDMDetail';
 import Appels from './pages/Appels';
-import Contrats from './pages/Contrats';
 import ProspectsPipeline from './pages/ProspectsPipeline';
 import FeuilleDeTTemps from './pages/FeuilleDeTTemps';
 import ValidationTemps from './pages/ValidationTemps';
@@ -94,7 +92,6 @@ function AppRoutes() {
       <Route path="/documents" element={<ProtectedRoute><AppLayout><GED /></AppLayout></ProtectedRoute>} />
       <Route path="/collaborateurs" element={<ProtectedRoute roles={['expert']}><AppLayout><Collaborateurs /></AppLayout></ProtectedRoute>} />
       <Route path="/devis" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Devis /></AppLayout></ProtectedRoute>} />
-      <Route path="/devis/new" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><DevisWizard /></AppLayout></ProtectedRoute>} />
       <Route path="/devis/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><DevisDetail /></AppLayout></ProtectedRoute>} />
       <Route path="/factures" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Factures /></AppLayout></ProtectedRoute>} />
       <Route path="/lettrage" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Lettrage /></AppLayout></ProtectedRoute>} />
@@ -103,7 +100,8 @@ function AppRoutes() {
       <Route path="/prospects-pipeline" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ProspectsPipeline /></AppLayout></ProtectedRoute>} />
       <Route path="/prospects" element={<Navigate to="/prospects-pipeline?tab=prospects" replace />} />
       <Route path="/pipeline"  element={<Navigate to="/prospects-pipeline?tab=pipeline"  replace />} />
-      <Route path="/dimensionnement" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Dimensionnement /></AppLayout></ProtectedRoute>} />
+      <Route path="/chiffrage" element={<Navigate to="/devis" replace />} />
+      <Route path="/dimensionnement" element={<Navigate to="/devis" replace />} />
       <Route path="/relances" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Relances /></AppLayout></ProtectedRoute>} />
       <Route path="/rentabilite" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Rentabilite /></AppLayout></ProtectedRoute>} />
       <Route path="/charge-travail" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ChargeTravail /></AppLayout></ProtectedRoute>} />

@@ -85,7 +85,7 @@ export default function Sidebar() {
             <Section label="Production">
               <Link to="/travaux"       icon="⚙️"  label="Missions" />
               <Link to="/planning"      icon="📅"  label="Planning" />
-              <Link to="/portefeuille"  icon="🗂️"  label="Portefeuille" />
+              <Link to="/portefeuille"  icon="🗂️"  label="Mon portefeuille" />
               <Link to="/charge-travail"icon="⚖️"  label="Charge de travail" />
               <Link to="/absences"      icon="🏖️"  label="Absences" />
             </Section>
