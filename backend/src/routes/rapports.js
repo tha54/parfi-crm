@@ -174,7 +174,7 @@ router.get('/portfolio', verifyToken, requireRole('expert', 'chef_mission'), asy
     const [signalFaible] = await pool.query(
       `SELECT c.id, c.nom, MAX(i.cree_le) AS derniere_interaction
        FROM clients c
-       LEFT JOIN interactions i ON i.client_id=c.id
+       LEFT JOIN interactions_log i ON i.client_id=c.id
        WHERE c.actif=1
        GROUP BY c.id
        HAVING derniere_interaction IS NULL OR DATEDIFF(NOW(), derniere_interaction) > 60

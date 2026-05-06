@@ -66,7 +66,7 @@ router.get('/:id', verifyToken, async (req, res) => {
       [req.params.id]
     );
     const [factures] = await pool.query('SELECT * FROM factures WHERE contactId = ? ORDER BY createdAt DESC LIMIT 20', [req.params.id]);
-    const [interactions] = await pool.query('SELECT * FROM interactions WHERE contactId = ? ORDER BY createdAt DESC LIMIT 20', [req.params.id]);
+    const [interactions] = await pool.query('SELECT * FROM interactions_log WHERE contact_id = ? ORDER BY cree_le DESC LIMIT 20', [req.params.id]);
     res.json({ ...contact, personnes, missions, factures, interactions });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
@@ -184,9 +184,9 @@ router.post('/:id/interactions', verifyToken, async (req, res) => {
   const { type, titre, sujet, description, dateInteraction } = req.body;
   try {
     const [r] = await pool.query(
-      `INSERT INTO interactions (contactId, type, titre, description, dateInteraction)
-       VALUES (?,?,?,?,?)`,
-      [req.params.id, type || 'note', titre || sujet || 'Note', description || null, dateInteraction || new Date()]
+      `INSERT INTO interactions_log (contact_id, utilisateur_id, type, objet, contenu, date_interaction)
+       VALUES (?,?,?,?,?,?)`,
+      [req.params.id, req.user?.id || null, type || 'note', titre || sujet || 'Note', description || null, dateInteraction || new Date()]
     );
     res.status(201).json({ id: r.insertId });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
