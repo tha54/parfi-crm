@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import Contrats from './Contrats';
+import HonorairesModal from '../components/HonorairesModal';
 
 const STATUTS = { brouillon: 'Brouillon', envoyee: 'Envoyée', signee: 'Signée', archivee: 'Archivée' };
 const STATUT_COLORS = { brouillon: 'autre', envoyee: 'en_cours', signee: 'termine', archivee: 'inactif' };
@@ -28,58 +30,24 @@ function fmt(v) {
 export default function LettresMission() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') === 'contrats' ? 'contrats' : 'ldm');
   const [lettres, setLettres] = useState([]);
-  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({
-    client_id: '', typeMission: 'tenue_comptable', objetMission: '',
-    montantHonorairesHT: '', dateDebut: '', dateFin: '',
-  });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
 
   const canEdit = ['expert', 'chef_mission'].includes(user?.role);
 
   useEffect(() => {
-    Promise.all([
-      api.get('/lettres-mission').then(r => setLettres(r.data)),
-      api.get('/clients').then(r => setClients(r.data)),
-    ]).finally(() => setLoading(false));
+    api.get('/lettres-mission').then(r => setLettres(r.data)).finally(() => setLoading(false));
   }, []);
 
   const reload = () => api.get('/lettres-mission').then(r => setLettres(r.data));
 
-  const openCreate = () => {
-    const today = new Date().toISOString().substring(0, 10);
-    setForm({ client_id: '', typeMission: 'tenue_comptable', objetMission: '', montantHonorairesHT: '', dateDebut: today, dateFin: '' });
-    setErr(''); setModal('create');
-  };
+  const [showHonorairesModal, setShowHonorairesModal] = useState(false);
 
-  const openEdit = (l) => {
-    setForm({
-      client_id: l.client_id || '',
-      typeMission: l.typeMission || 'tenue_comptable',
-      objetMission: l.objetMission || '',
-      montantHonorairesHT: l.montantHonorairesHT || '',
-      dateDebut: l.dateDebut ? l.dateDebut.substring(0, 10) : '',
-      dateFin: l.dateFin ? l.dateFin.substring(0, 10) : '',
-    });
-    setErr(''); setModal(l);
-  };
-
-  const save = async () => {
-    if (!form.client_id || !form.typeMission) { setErr('Client et type de mission requis'); return; }
-    setSaving(true); setErr('');
-    try {
-      if (modal === 'create') await api.post('/lettres-mission', form);
-      else await api.put(`/lettres-mission/${modal.id}`, form);
-      await reload(); setModal(null);
-    } catch (e) { setErr(e.response?.data?.message || 'Erreur'); }
-    finally { setSaving(false); }
-  };
+  const openCreate = () => setShowHonorairesModal(true);
 
   const changeStatut = async (l, statut) => {
     try { await api.put(`/lettres-mission/${l.id}`, { statut }); await reload(); }
@@ -101,18 +69,46 @@ export default function LettresMission() {
 
   const totalHonoraires = lettres.filter(l => l.statut === 'signee').reduce((s, l) => s + parseFloat(l.montantHonorairesHT || 0), 0);
 
-  if (loading) return <div className="spinner"><div className="spinner-ring" /></div>;
+  const TabBar = () => (
+    <div style={{
+      display: 'flex', gap: 0,
+      borderBottom: '2px solid var(--border)',
+      background: 'var(--bg-primary)',
+      padding: '0 24px',
+    }}>
+      {[
+        { key: 'ldm',      icon: '📋', label: 'Lettres de mission' },
+        { key: 'contrats', icon: '🤝', label: 'Contrats actifs' },
+      ].map(({ key, icon, label }) => (
+        <button key={key} onClick={() => setTab(key)} style={{
+          padding: '12px 20px', border: 'none',
+          borderBottom: tab === key ? '2px solid var(--primary)' : '2px solid transparent',
+          marginBottom: -2, background: 'none', cursor: 'pointer',
+          fontWeight: tab === key ? 700 : 400,
+          color: tab === key ? 'var(--primary)' : 'var(--text-secondary)',
+          fontSize: 14, display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          {icon} {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (tab === 'contrats') return (
+    <>
+      <TabBar />
+      <Contrats />
+    </>
+  );
+
+  if (loading) return <><TabBar /><div className="spinner"><div className="spinner-ring" /></div></>;
 
   return (
     <>
+      <TabBar />
       <div className="page-header">
         <h1>Lettres de mission</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {canEdit && (
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/dimensionnement')} title="Calculer les honoraires et créer une LDM depuis le dimensionnement">
-              📐 Dimensionner
-            </button>
-          )}
           {canEdit && <button className="btn btn-primary" onClick={openCreate}>+ Nouvelle lettre</button>}
         </div>
       </div>
@@ -193,7 +189,7 @@ export default function LettresMission() {
                                 value={l.statut} onChange={e => changeStatut(l, e.target.value)}>
                                 {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                               </select>
-                              <button className="btn btn-ghost btn-sm" onClick={() => openEdit(l)}>✏️</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/lettres-mission/${l.id}`)}>✏️</button>
                               {user?.role === 'expert' && <button className="btn btn-danger btn-sm" onClick={() => del(l)}>🗑</button>}
                             </div>
                           </td>
@@ -208,72 +204,12 @@ export default function LettresMission() {
         </div>
       </div>
 
-      {modal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
-          <div className="modal">
-            <div className="modal-header">
-              <span className="modal-title">{modal === 'create' ? 'Nouvelle lettre de mission' : `Modifier ${modal.numero}`}</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ fontSize: 12 }}
-                  onClick={() => navigate(`/dimensionnement?returnTo=ldm${form.client_id ? `&clientId=${form.client_id}` : ''}`)}
-                  title="Calculer les honoraires depuis le dimensionnement"
-                >
-                  📐 Calculer avec le dimensionnement
-                </button>
-                <button className="modal-close" onClick={() => setModal(null)}>×</button>
-              </div>
-            </div>
-            <div className="modal-body">
-              {err && <div className="alert alert-error">{err}</div>}
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Client *</label>
-                  <select className="form-control" value={form.client_id} onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))}>
-                    <option value="">Sélectionner un client</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Type de mission *</label>
-                  <select className="form-control" value={form.typeMission} onChange={e => setForm(f => ({ ...f, typeMission: e.target.value }))}>
-                    {Object.entries(TYPES_MISSION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Objet de la mission</label>
-                <textarea className="form-control" rows={3} value={form.objetMission} onChange={e => setForm(f => ({ ...f, objetMission: e.target.value }))} placeholder="Description des prestations confiées…" />
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Honoraires HT (€)</label>
-                  <input type="number" className="form-control" value={form.montantHonorairesHT} onChange={e => setForm(f => ({ ...f, montantHonorairesHT: e.target.value }))} min="0" step="0.01" placeholder="0.00" />
-                </div>
-                <div className="form-group" />
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Date de début</label>
-                  <input type="date" className="form-control" value={form.dateDebut} onChange={e => setForm(f => ({ ...f, dateDebut: e.target.value }))} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Date de fin <span className="text-muted">(optionnel)</span></label>
-                  <input type="date" className="form-control" value={form.dateFin} onChange={e => setForm(f => ({ ...f, dateFin: e.target.value }))} />
-                </div>
-              </div>
-
-              <div className="form-actions">
-                <button className="btn btn-ghost" onClick={() => setModal(null)}>Annuler</button>
-                <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {showHonorairesModal && (
+        <HonorairesModal
+          type="ldm"
+          onSaved={async (id) => { setShowHonorairesModal(false); await reload(); navigate(`/lettres-mission/${id}`); }}
+          onClose={() => setShowHonorairesModal(false)}
+        />
       )}
     </>
   );
