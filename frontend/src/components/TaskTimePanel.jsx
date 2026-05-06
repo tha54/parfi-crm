@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 import TaskBudgetBar from './TaskBudgetBar';
 
@@ -20,130 +20,130 @@ const fmtElapsed = (sec) => {
   return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
 };
 
-const fmtDateTime = (d) => {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('fr-FR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-};
-
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
+const fmtDate = (d) => d ? new Date(String(d).split('T')[0] + 'T12:00:00').toLocaleDateString('fr-FR') : '—';
 const todayISO = () => new Date().toISOString().split('T')[0];
 
-// ─── Shared style tokens ──────────────────────────────────────────────────────
+const STATUT_COLORS = {
+  brouillon: { bg: '#f0f9ff', border: '#bae6fd', text: '#0369a1' },
+  figee:     { bg: '#faf5ff', border: '#e9d5ff', text: '#7c3aed' },
+  validee:   { bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' },
+  rejetee:   { bg: '#fff1f2', border: '#fecdd3', text: '#be123c' },
+};
+const STATUT_LABEL = { brouillon: 'Brouillon', figee: 'Figée', validee: 'Validée', rejetee: 'Rejetée' };
+const SOURCE_LABEL = { chrono: 'Chrono', feuille_temps: 'Feuille', correction: 'Correction' };
 
 const boxStyle = {
   background: '#f8f9fb', borderRadius: 8, padding: '12px 14px',
   border: '1px solid var(--border)',
 };
-
-const labelStyle = {
-  fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
-  display: 'block', marginBottom: 4,
-};
-
+const labelStyle = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 4 };
 const taStyle = {
   width: '100%', padding: '8px 10px', fontSize: 12, lineHeight: 1.5,
   border: '1px solid var(--border)', borderRadius: 6, resize: 'vertical',
   outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', minHeight: 52,
 };
 
+// ─── Chrono helpers ───────────────────────────────────────────────────────────
+
+function getChronoState(tacheId) {
+  const storedId = localStorage.getItem('chrono_task_id');
+  const start    = parseInt(localStorage.getItem('chrono_start') || '0', 10);
+  if (storedId === String(tacheId) && start > 0) return { active: true, start };
+  return { active: false, start: 0 };
+}
+
+function minsToHM(mins) {
+  return { hours: String(Math.floor(mins / 60)), minutes: String(mins % 60) };
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TaskTimePanel({ tache }) {
-  const [data, setData]         = useState({ entries: [], budget: null, activeTimer: null });
+  const [data, setData]         = useState({ entries: [], budget: null });
   const [loading, setLoading]   = useState(true);
+  const [chrono, setChrono]     = useState(() => getChronoState(tache.id));
   const [elapsed, setElapsed]   = useState(0);
-  const [stopping, setStopping] = useState(false);
-  const [stopComment, setStopComment] = useState('');
-  const [showManual, setShowManual]   = useState(false);
+  const [showModal, setShowModal]   = useState(false);
+  const [modalSource, setModalSource] = useState('chrono');
   const [manual, setManual] = useState({ hours: '', minutes: '', comment: '', date: todayISO() });
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError]           = useState('');
+  const [error, setError]       = useState('');
   const intervalRef = useRef(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const { data: d } = await api.get(`/tache-temps/tache/${tache.id}`);
       setData(d);
     } catch {
-      setData({ entries: [], budget: null, activeTimer: null });
+      setData({ entries: [], budget: null });
     } finally {
       setLoading(false);
     }
-  };
+  }, [tache.id]);
 
-  useEffect(() => { loadData(); }, [tache.id]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  // Live clock for active timer
+  // Live chrono tick
   useEffect(() => {
     clearInterval(intervalRef.current);
-    if (data.activeTimer) {
-      const start = new Date(data.activeTimer.debut).getTime();
-      const tick  = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    if (chrono.active && chrono.start > 0) {
+      const tick = () => setElapsed(Math.floor((Date.now() - chrono.start) / 1000));
       tick();
       intervalRef.current = setInterval(tick, 1000);
     }
     return () => clearInterval(intervalRef.current);
-  }, [data.activeTimer]);
+  }, [chrono]);
 
-  const { entries, budget, activeTimer } = data;
-  const budgetExceeded = budget && budget.percent >= 100;
+  const { entries, budget } = data;
 
-  // ── Timer actions ──
+  // ── Chrono ──
 
-  const handleStart = async () => {
-    setError('');
-    try {
-      await api.post(`/tache-temps/tache/${tache.id}/start`);
-      loadData();
-    } catch (e) {
-      setError(e.response?.data?.message || 'Erreur');
+  const handleStart = () => {
+    // Warn if another task has active chrono
+    const existingId = localStorage.getItem('chrono_task_id');
+    if (existingId && existingId !== String(tache.id)) {
+      if (!confirm('Un chronomètre est en cours sur une autre tâche. Voulez-vous le remplacer ?')) return;
     }
+    const start = Date.now();
+    localStorage.setItem('chrono_task_id', String(tache.id));
+    localStorage.setItem('chrono_start', String(start));
+    setChrono({ active: true, start });
+    setError('');
   };
 
-  const handleStop = async () => {
-    setError('');
-    if (budgetExceeded && !stopComment.trim()) {
-      setError('Un commentaire est obligatoire lorsque le budget est dépassé.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await api.put(`/tache-temps/${activeTimer.id}/stop`, { commentaire: stopComment });
-      setStopping(false);
-      setStopComment('');
-      loadData();
-    } catch (e) {
-      setError(e.response?.data?.message || 'Erreur');
-    } finally {
-      setSubmitting(false);
-    }
+  const handleStop = () => {
+    const start = parseInt(localStorage.getItem('chrono_start') || '0', 10);
+    const durationMs = Date.now() - start;
+    const durationMin = Math.max(1, Math.round(durationMs / 60000));
+    localStorage.removeItem('chrono_task_id');
+    localStorage.removeItem('chrono_start');
+    setChrono({ active: false, start: 0 });
+    clearInterval(intervalRef.current);
+    const hm = minsToHM(durationMin);
+    setManual({ hours: hm.hours, minutes: hm.minutes, comment: '', date: todayISO() });
+    setModalSource('chrono');
+    setShowModal(true);
   };
 
-  // ── Manual entry ──
+  // ── Submit (chrono stop or manual) ──
 
-  const handleManual = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     const h = parseInt(manual.hours  || '0', 10);
     const m = parseInt(manual.minutes || '0', 10);
     const total = h * 60 + m;
     if (total <= 0) { setError('Durée invalide (minimum 1 minute)'); return; }
-    if (budgetExceeded && !manual.comment.trim()) {
-      setError('Un commentaire est obligatoire lorsque le budget est dépassé.');
-      return;
-    }
     setSubmitting(true);
     try {
       await api.post(`/tache-temps/tache/${tache.id}`, {
         duree_minutes: total,
         commentaire:   manual.comment.trim() || null,
-        date:          manual.date || todayISO(),
+        date_travail:  manual.date || todayISO(),
+        source:        modalSource,
       });
-      setShowManual(false);
+      setShowModal(false);
       setManual({ hours: '', minutes: '', comment: '', date: todayISO() });
       loadData();
     } catch (e) {
@@ -177,7 +177,6 @@ export default function TaskTimePanel({ tache }) {
         </div>
       )}
 
-      {/* Error banner */}
       {error && (
         <div style={{ padding: '8px 12px', background: '#ffebee', color: '#d63031', borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
           {error}
@@ -186,11 +185,9 @@ export default function TaskTimePanel({ tache }) {
 
       {/* ── Chronomètre ── */}
       <div style={boxStyle}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: '#0F1F4B', marginBottom: 12 }}>
-          ⏱ Chronomètre
-        </div>
+        <div style={{ fontWeight: 700, fontSize: 13, color: '#0F1F4B', marginBottom: 12 }}>⏱ Chronomètre</div>
 
-        {activeTimer ? (
+        {chrono.active ? (
           <>
             <div style={{
               fontFamily: 'monospace', fontSize: 32, fontWeight: 800, textAlign: 'center',
@@ -199,55 +196,14 @@ export default function TaskTimePanel({ tache }) {
               {fmtElapsed(elapsed)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 14 }}>
-              Démarré le {fmtDateTime(activeTimer.debut)}
+              En cours…
             </div>
-
-            {!stopping ? (
-              <button
-                className="btn btn-danger"
-                style={{ width: '100%' }}
-                onClick={() => { setStopping(true); setError(''); }}
-              >
-                ⏹ Arrêter le chronomètre
-              </button>
-            ) : (
-              <div>
-                <label style={labelStyle}>
-                  Commentaire {budgetExceeded && <span style={{ color: '#d63031' }}>* obligatoire</span>}
-                </label>
-                <textarea
-                  value={stopComment}
-                  onChange={e => setStopComment(e.target.value)}
-                  placeholder={budgetExceeded ? 'Obligatoire (budget dépassé)…' : 'Optionnel…'}
-                  rows={2}
-                  style={taStyle}
-                />
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ flex: 1 }}
-                    onClick={() => { setStopping(false); setStopComment(''); setError(''); }}
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    style={{ flex: 2 }}
-                    onClick={handleStop}
-                    disabled={submitting}
-                  >
-                    {submitting ? 'Arrêt…' : '✓ Confirmer l\'arrêt'}
-                  </button>
-                </div>
-              </div>
-            )}
+            <button className="btn btn-danger" style={{ width: '100%' }} onClick={handleStop}>
+              ⏹ Arrêter et saisir
+            </button>
           </>
         ) : (
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%' }}
-            onClick={handleStart}
-          >
+          <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleStart}>
             ▶ Démarrer le chronomètre
           </button>
         )}
@@ -255,80 +211,64 @@ export default function TaskTimePanel({ tache }) {
 
       {/* ── Saisie manuelle ── */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: showManual ? 10 : 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: showModal && modalSource === 'feuille_temps' ? 10 : 0 }}>
           <span style={{ fontWeight: 700, fontSize: 13, color: '#0F1F4B' }}>✏ Saisie manuelle</span>
           <button
             className="btn btn-ghost btn-sm"
-            onClick={() => { setShowManual(v => !v); setError(''); }}
+            onClick={() => {
+              if (showModal && modalSource === 'feuille_temps') {
+                setShowModal(false);
+              } else {
+                setManual({ hours: '', minutes: '', comment: '', date: todayISO() });
+                setModalSource('feuille_temps');
+                setShowModal(true);
+              }
+              setError('');
+            }}
           >
-            {showManual ? '✕ Fermer' : '+ Ajouter'}
+            {showModal && modalSource === 'feuille_temps' ? '✕ Fermer' : '+ Ajouter'}
           </button>
         </div>
-
-        {showManual && (
-          <form onSubmit={handleManual} style={{ ...boxStyle, marginTop: 8 }}>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Heures</label>
-                <input
-                  type="number" min="0" max="23" placeholder="0"
-                  className="form-control"
-                  value={manual.hours}
-                  onChange={e => setManual(f => ({ ...f, hours: e.target.value }))}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Minutes</label>
-                <input
-                  type="number" min="0" max="59" placeholder="30"
-                  className="form-control"
-                  value={manual.minutes}
-                  onChange={e => setManual(f => ({ ...f, minutes: e.target.value }))}
-                />
-              </div>
-              <div style={{ flex: 2 }}>
-                <label style={labelStyle}>Date</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={manual.date}
-                  onChange={e => setManual(f => ({ ...f, date: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>
-                Commentaire {budgetExceeded && <span style={{ color: '#d63031' }}>* obligatoire</span>}
-              </label>
-              <textarea
-                value={manual.comment}
-                onChange={e => setManual(f => ({ ...f, comment: e.target.value }))}
-                placeholder={budgetExceeded ? 'Obligatoire (budget dépassé)…' : 'Optionnel…'}
-                rows={2}
-                style={taStyle}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ flex: 1 }}
-                onClick={() => { setShowManual(false); setError(''); }}
-              >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                style={{ flex: 2 }}
-                disabled={submitting}
-              >
-                {submitting ? 'Enregistrement…' : '+ Enregistrer'}
-              </button>
-            </div>
-          </form>
-        )}
       </div>
+
+      {/* ── Entry form (modal / stop / manual) ── */}
+      {showModal && (
+        <form onSubmit={handleSubmit} style={{ ...boxStyle, background: '#fff', border: '1px solid #c7d2fe' }}>
+          <div style={{ fontWeight: 700, fontSize: 12, color: '#4338ca', marginBottom: 10 }}>
+            {modalSource === 'chrono' ? '⏱ Saisie chrono' : '✏ Saisie manuelle'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Heures</label>
+              <input type="number" min="0" max="23" placeholder="0" className="form-control"
+                value={manual.hours} onChange={e => setManual(f => ({ ...f, hours: e.target.value }))} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Minutes</label>
+              <input type="number" min="0" max="59" placeholder="30" className="form-control"
+                value={manual.minutes} onChange={e => setManual(f => ({ ...f, minutes: e.target.value }))} />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={labelStyle}>Date</label>
+              <input type="date" className="form-control"
+                value={manual.date} onChange={e => setManual(f => ({ ...f, date: e.target.value }))} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={labelStyle}>Commentaire</label>
+            <textarea value={manual.comment} rows={2} style={taStyle} placeholder="Optionnel…"
+              onChange={e => setManual(f => ({ ...f, comment: e.target.value }))} />
+          </div>
+          {error && <div style={{ fontSize: 12, color: '#d63031', marginBottom: 8, fontWeight: 600 }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn btn-ghost btn-sm" style={{ flex: 1 }}
+              onClick={() => { setShowModal(false); setError(''); }}>Annuler</button>
+            <button type="submit" className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={submitting}>
+              {submitting ? 'Enregistrement…' : '✓ Enregistrer'}
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* ── Historique ── */}
       <div>
@@ -336,7 +276,7 @@ export default function TaskTimePanel({ tache }) {
           Historique
           {entries.length > 0 && (
             <span style={{ marginLeft: 8, fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}>
-              · {entries.length} saisie(s) · total {fmtMin(entries.filter(e => e.duree_minutes).reduce((s, e) => s + e.duree_minutes, 0))}
+              · {entries.length} saisie(s) · {fmtMin(entries.filter(e => e.statut !== 'rejetee').reduce((s, e) => s + (e.duree_minutes || 0), 0))}
             </span>
           )}
         </div>
@@ -348,47 +288,50 @@ export default function TaskTimePanel({ tache }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {entries.map(e => {
-              const isActive = e.fin === null;
+              const sc = STATUT_COLORS[e.statut] || STATUT_COLORS.brouillon;
               return (
                 <div key={e.id} style={{
                   ...boxStyle, padding: '8px 12px',
                   display: 'flex', gap: 10, alignItems: 'flex-start',
-                  borderLeft: `3px solid ${isActive ? '#00B4D8' : '#00897b'}`,
+                  borderLeft: `3px solid ${sc.border}`,
+                  background: sc.bg,
                 }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                    background: isActive ? '#00B4D8' : '#00897b',
-                    color: '#fff', display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', fontSize: 12, fontWeight: 700,
-                  }}>
-                    {isActive ? '⏱' : '✓'}
-                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                       <span style={{ fontSize: 14, fontWeight: 700, color: '#0F1F4B' }}>
-                        {isActive ? '⏱ En cours…' : fmtMin(e.duree_minutes)}
+                        {fmtMin(e.duree_minutes)}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        {e.type === 'chrono' ? 'Chrono' : 'Manuel'}
-                      </span>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 10,
+                          background: sc.border, color: sc.text,
+                        }}>
+                          {STATUT_LABEL[e.statut] || e.statut}
+                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          {SOURCE_LABEL[e.source] || e.source}
+                        </span>
+                      </div>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {e.prenom} {e.user_nom} · {fmtDate(e.debut)}
-                      {e.fin && ` → ${fmtDate(e.fin)}`}
+                      {e.prenom} {e.user_nom} · {fmtDate(e.date_travail)}
                     </div>
                     {e.commentaire && (
                       <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 4, fontStyle: 'italic', background: '#fff', padding: '4px 8px', borderRadius: 4 }}>
                         {e.commentaire}
                       </div>
                     )}
+                    {e.statut === 'rejetee' && e.motif_rejet && (
+                      <div style={{ fontSize: 11, color: '#be123c', marginTop: 4, background: '#fff1f2', padding: '4px 8px', borderRadius: 4 }}>
+                        ✗ {e.motif_rejet}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={() => handleDelete(e.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, padding: '0 2px', flexShrink: 0, lineHeight: 1 }}
-                    title="Supprimer cette saisie"
-                  >
-                    ×
-                  </button>
+                  {e.statut === 'brouillon' && (
+                    <button onClick={() => handleDelete(e.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, padding: '0 2px', flexShrink: 0, lineHeight: 1 }}
+                      title="Supprimer cette saisie">×</button>
+                  )}
                 </div>
               );
             })}

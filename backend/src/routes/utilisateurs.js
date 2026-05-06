@@ -8,7 +8,13 @@ const { verifyToken, requireRole } = require('../middleware/auth');
 router.get('/', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, nom, prenom, email, role, actif, cree_le FROM utilisateurs ORDER BY nom'
+      `SELECT u.id, u.nom, u.prenom, u.email, u.role, u.role_metier,
+              u.taux_horaire, u.chef_id, u.actif, u.cree_le,
+              COALESCE(u.taux_horaire, r.taux_horaire) AS taux_effectif,
+              r.libelle AS role_metier_libelle
+       FROM utilisateurs u
+       LEFT JOIN roles_metier_config r ON r.code = u.role_metier
+       ORDER BY u.nom`
     );
     res.json(rows);
   } catch {
@@ -20,7 +26,13 @@ router.get('/', verifyToken, requireRole('expert', 'chef_mission'), async (req, 
 router.get('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, nom, prenom, email, role, actif, cree_le FROM utilisateurs WHERE id = ?',
+      `SELECT u.id, u.nom, u.prenom, u.email, u.role, u.role_metier,
+              u.taux_horaire, u.chef_id, u.actif, u.cree_le,
+              COALESCE(u.taux_horaire, r.taux_horaire) AS taux_effectif,
+              r.libelle AS role_metier_libelle
+       FROM utilisateurs u
+       LEFT JOIN roles_metier_config r ON r.code = u.role_metier
+       WHERE u.id = ?`,
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ message: 'Utilisateur introuvable' });
@@ -57,7 +69,7 @@ router.post('/', verifyToken, requireRole('expert'), async (req, res) => {
 
 // Update user — expert only
 router.put('/:id', verifyToken, requireRole('expert'), async (req, res) => {
-  const { nom, prenom, email, role, actif, mot_de_passe } = req.body;
+  const { nom, prenom, email, role, role_metier, taux_horaire, chef_id, actif, mot_de_passe } = req.body;
   try {
     const fields = [];
     const values = [];
@@ -65,6 +77,12 @@ router.put('/:id', verifyToken, requireRole('expert'), async (req, res) => {
     if (prenom !== undefined) { fields.push('prenom = ?'); values.push(prenom); }
     if (email !== undefined) { fields.push('email = ?'); values.push(email); }
     if (role !== undefined) { fields.push('role = ?'); values.push(role); }
+    if (role_metier !== undefined) { fields.push('role_metier = ?'); values.push(role_metier); }
+    if (taux_horaire !== undefined) {
+      fields.push('taux_horaire = ?');
+      values.push(taux_horaire === '' || taux_horaire === null ? null : parseFloat(taux_horaire));
+    }
+    if (chef_id !== undefined) { fields.push('chef_id = ?'); values.push(chef_id || null); }
     if (actif !== undefined) { fields.push('actif = ?'); values.push(actif); }
     if (mot_de_passe) {
       const hash = await bcrypt.hash(mot_de_passe, 12);

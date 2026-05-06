@@ -1,126 +1,159 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 
-const fmt = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n || 0);
-const fmtPct = (n) => `${n || 0}%`;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function RentaBar({ value, max = 100 }) {
-  const pct = Math.min(150, value || 0);
-  const color = pct > 110 ? '#00897b' : pct < 70 ? '#d63031' : '#e67e22';
+const fmtH = (m) => {
+  if (!m && m !== 0) return '—';
+  const h = Math.floor(m / 60);
+  const mn = m % 60;
+  return mn === 0 ? `${h}h` : `${h}h${String(mn).padStart(2, '0')}`;
+};
+
+const ROLE_METIER_LABEL = {
+  expert_comptable:        'Expert-Comptable',
+  chef_de_groupe:          'Chef de Groupe',
+  chef_de_mission:         'Chef de Mission',
+  collaborateur:           'Collaborateur',
+  collaborateur_social:    'Collab. Social',
+  collaborateur_juridique: 'Collab. Juridique',
+};
+
+// Fiabilité = % saisies validées / (validées + figées)
+function FiabiliteIcon({ fiabilite }) {
+  if (fiabilite === null || fiabilite === undefined) return <span style={{ color: '#94a3b8' }}>—</span>;
+  if (fiabilite >= 80) return <span title={`Fiabilité ${fiabilite}%`}>🟢 {fiabilite}%</span>;
+  if (fiabilite >= 50) return <span title={`Fiabilité ${fiabilite}%`}>🟡 {fiabilite}%</span>;
+  return <span title={`Fiabilité ${fiabilite}%`}>🟠 {fiabilite}%</span>;
+}
+
+function UtilBar({ taux }) {
+  const v = Math.min(150, taux || 0);
+  const color = v > 100 ? '#d63031' : v >= 85 ? '#e67e22' : '#00897b';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ flex: 1, height: 8, background: '#eee', borderRadius: 4 }}>
-        <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: color, borderRadius: 4 }} />
+      <div style={{ flex: 1, height: 8, background: '#eee', borderRadius: 4, minWidth: 60 }}>
+        <div style={{ width: `${Math.min(100, v)}%`, height: '100%', background: color, borderRadius: 4 }} />
       </div>
-      <span style={{ fontSize: 12, fontWeight: 600, color, minWidth: 40 }}>{value?.toFixed(0) || 0}%</span>
+      <span style={{ fontSize: 12, fontWeight: 700, color, minWidth: 42 }}>{(taux || 0).toFixed(0)}%</span>
     </div>
   );
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function Rentabilite() {
-  const [data, setData] = useState({ missions: [], totals: {}, parCollaborateur: [] });
+  const [data, setData] = useState({ clients: [], collaborateurs: [], totals: {} });
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('missions');
-  const [filterIntervenant, setFilterIntervenant] = useState('');
-  const [intervenants, setIntervenants] = useState([]);
+  const [tab, setTab] = useState('clients');
+  const [filterCollabId, setFilterCollabId] = useState('');
+  const [utilisateurs, setUtilisateurs] = useState([]);
+  const [annee, setAnnee] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
-      const [rRes, iRes] = await Promise.all([
-        api.get(`/rentabilite${filterIntervenant ? `?intervenantId=${filterIntervenant}` : ''}`),
-        api.get('/intervenants?actif=true'),
+      const params = new URLSearchParams();
+      if (filterCollabId) params.set('collaborateurId', filterCollabId);
+      if (annee) params.set('annee', annee);
+      const [rRes, uRes] = await Promise.all([
+        api.get(`/rentabilite${params.toString() ? '?' + params : ''}`),
+        api.get('/utilisateurs'),
       ]);
       setData(rRes.data);
-      setIntervenants(iRes.data);
+      setUtilisateurs(uRes.data.filter(u => u.role !== 'client'));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [filterIntervenant]);
+  useEffect(() => { load(); }, [filterCollabId, annee]);
 
-  const { missions = [], totals = {}, parCollaborateur = [] } = data;
+  const { clients = [], collaborateurs = [], totals = {} } = data;
+
+  const years = [];
+  for (let y = new Date().getFullYear(); y >= 2023; y--) years.push(y);
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header" style={{ flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title">Rentabilité</h1>
-          <p className="page-subtitle">Performance économique des missions</p>
+          <p className="page-subtitle">Budget vs temps saisi (tâches validées)</p>
         </div>
-        <select className="form-control" style={{ width: 220 }} value={filterIntervenant} onChange={e => setFilterIntervenant(e.target.value)}>
-          <option value="">Tous les intervenants</option>
-          {intervenants.map(i => <option key={i.id} value={i.id}>{i.prenom} {i.nom}</option>)}
-        </select>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select className="form-control" style={{ width: 180 }} value={filterCollabId} onChange={e => setFilterCollabId(e.target.value)}>
+            <option value="">Tous les collaborateurs</option>
+            {utilisateurs.map(u => <option key={u.id} value={u.id}>{u.prenom} {u.nom}</option>)}
+          </select>
+          <select className="form-control" style={{ width: 120 }} value={annee} onChange={e => setAnnee(e.target.value)}>
+            <option value="">Toutes années</option>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* KPIs globaux */}
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 24 }}>
         <div className="kpi-card" style={{ borderLeft: '4px solid #0f1f4b' }}>
-          <div className="kpi-value">{fmt(totals.totalBudget)}</div>
-          <div className="kpi-label">Honoraires budgétés</div>
+          <div className="kpi-value">{fmtH(totals.budget_minutes)}</div>
+          <div className="kpi-label">Budget total</div>
         </div>
         <div className="kpi-card" style={{ borderLeft: '4px solid #00897b' }}>
-          <div className="kpi-value">{fmt(totals.totalCaFacture)}</div>
-          <div className="kpi-label">CA facturé</div>
+          <div className="kpi-value">{fmtH(totals.temps_realise_minutes)}</div>
+          <div className="kpi-label">Temps saisi</div>
         </div>
-        <div className="kpi-card" style={{ borderLeft: `4px solid ${(totals.tauxRentabiliteGlobal || 0) >= 90 ? '#00897b' : '#d63031'}` }}>
-          <div className="kpi-value">{fmtPct(totals.tauxRentabiliteGlobal)}</div>
-          <div className="kpi-label">Taux de rentabilité</div>
+        <div className="kpi-card" style={{ borderLeft: '4px solid #6366f1' }}>
+          <div className="kpi-value">{fmtH(totals.temps_valide_minutes)}</div>
+          <div className="kpi-label">Temps validé</div>
         </div>
-        <div className="kpi-card" style={{ borderLeft: '4px solid #00b4d8' }}>
-          <div className="kpi-value">{totals.totalTempsBudgete?.toFixed(0) || 0}h</div>
-          <div className="kpi-label">Temps budgété</div>
-        </div>
-        <div className="kpi-card" style={{ borderLeft: `4px solid ${(totals.tauxUtilisationGlobal || 0) > 100 ? '#d63031' : '#e67e22'}` }}>
-          <div className="kpi-value">{fmtPct(totals.tauxUtilisationGlobal)}</div>
+        <div className="kpi-card" style={{
+          borderLeft: `4px solid ${(totals.taux_utilisation_global || 0) > 100 ? '#d63031' : (totals.taux_utilisation_global || 0) >= 85 ? '#e67e22' : '#00897b'}`,
+        }}>
+          <div className="kpi-value">{(totals.taux_utilisation_global || 0).toFixed(0)}%</div>
           <div className="kpi-label">Taux d'utilisation</div>
         </div>
       </div>
 
-      {/* Onglets */}
+      {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button className={`btn btn-sm ${tab === 'missions' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('missions')}>
-          Par mission ({missions.length})
+        <button className={`btn btn-sm ${tab === 'clients' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('clients')}>
+          Par client ({clients.length})
         </button>
         <button className={`btn btn-sm ${tab === 'collaborateurs' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('collaborateurs')}>
-          Par collaborateur ({parCollaborateur.length})
+          Par collaborateur ({collaborateurs.length})
         </button>
       </div>
 
-      {tab === 'missions' && (
+      {/* By client */}
+      {tab === 'clients' && (
         <div className="card">
           <div className="table-wrapper">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Mission</th>
                   <th>Client</th>
-                  <th>Intervenant</th>
-                  <th>Honoraires budg.</th>
-                  <th>CA facturé</th>
-                  <th>Boni/Mali</th>
-                  <th>Rentabilité</th>
-                  <th>Utilisation temps</th>
+                  <th style={{ textAlign: 'right' }}>Tâches</th>
+                  <th style={{ textAlign: 'right' }}>Budget</th>
+                  <th style={{ textAlign: 'right' }}>Réalisé</th>
+                  <th style={{ textAlign: 'right' }}>Validé</th>
+                  <th style={{ minWidth: 160 }}>Utilisation</th>
+                  <th style={{ textAlign: 'center' }}>Fiabilité</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Chargement…</td></tr>
-                ) : missions.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Aucune mission</td></tr>
-                ) : missions.map(m => (
-                  <tr key={m.id}>
-                    <td style={{ fontWeight: 500 }}>{m.nom}</td>
-                    <td>{m.contactNom || '—'}</td>
-                    <td>{m.intervenantNom || '—'}</td>
-                    <td>{fmt(m.honorairesBudgetes)}</td>
-                    <td>{fmt(m.caFacture)}</td>
-                    <td style={{ fontWeight: 600, color: Number(m.boniMali) >= 0 ? '#00897b' : '#d63031' }}>
-                      {Number(m.boniMali) >= 0 ? '+' : ''}{fmt(m.boniMali)}
-                    </td>
-                    <td style={{ minWidth: 140 }}><RentaBar value={Number(m.tauxRentabilite)} /></td>
-                    <td style={{ minWidth: 140 }}><RentaBar value={Number(m.tauxUtilisation)} /></td>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Chargement…</td></tr>
+                ) : clients.length === 0 ? (
+                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Aucune donnée</td></tr>
+                ) : clients.map(c => (
+                  <tr key={c.id}>
+                    <td style={{ fontWeight: 600 }}>{c.nom}</td>
+                    <td style={{ textAlign: 'right' }}>{c.nb_taches}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtH(c.budget_minutes)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtH(c.temps_realise_minutes)}</td>
+                    <td style={{ textAlign: 'right', color: '#15803d' }}>{fmtH(c.temps_valide_minutes)}</td>
+                    <td style={{ minWidth: 160 }}><UtilBar taux={c.taux_utilisation} /></td>
+                    <td style={{ textAlign: 'center', fontSize: 13 }}><FiabiliteIcon fiabilite={c.fiabilite} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -129,6 +162,7 @@ export default function Rentabilite() {
         </div>
       )}
 
+      {/* By collaborateur */}
       {tab === 'collaborateurs' && (
         <div className="card">
           <div className="table-wrapper">
@@ -137,35 +171,46 @@ export default function Rentabilite() {
                 <tr>
                   <th>Collaborateur</th>
                   <th>Profil</th>
-                  <th>Missions actives</th>
-                  <th>Budget honoraires</th>
-                  <th>Temps budgété</th>
-                  <th>Temps saisi</th>
-                  <th>Utilisation</th>
+                  <th style={{ textAlign: 'right' }}>Tâches</th>
+                  <th style={{ textAlign: 'right' }}>Budget</th>
+                  <th style={{ textAlign: 'right' }}>Réalisé</th>
+                  <th style={{ textAlign: 'right' }}>Validé</th>
+                  <th style={{ minWidth: 160 }}>Utilisation</th>
+                  <th style={{ textAlign: 'center' }}>Fiabilité</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32 }}>Chargement…</td></tr>
-                ) : parCollaborateur.map(c => {
-                  const taux = c.totalTempsBudgete > 0 ? Math.round((c.totalTempsPasse / c.totalTempsBudgete) * 100) : 0;
-                  return (
-                    <tr key={c.id}>
-                      <td style={{ fontWeight: 600 }}>{c.nom}</td>
-                      <td><span style={{ fontSize: 12, background: '#e0f6fc', color: '#0f1f4b', padding: '2px 8px', borderRadius: 12 }}>{c.categorie?.replace(/_/g, ' ')}</span></td>
-                      <td>{c.nbMissions}</td>
-                      <td>{fmt(c.totalBudget)}</td>
-                      <td>{Number(c.totalTempsBudgete).toFixed(0)}h</td>
-                      <td>{Number(c.totalTempsPasse).toFixed(1)}h</td>
-                      <td style={{ minWidth: 140 }}><RentaBar value={taux} /></td>
-                    </tr>
-                  );
-                })}
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Chargement…</td></tr>
+                ) : collaborateurs.length === 0 ? (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Aucune donnée</td></tr>
+                ) : collaborateurs.map(c => (
+                  <tr key={c.id}>
+                    <td style={{ fontWeight: 600 }}>{c.prenom} {c.nom}</td>
+                    <td>
+                      <span style={{ fontSize: 11, background: '#e0f6fc', color: '#0f1f4b', padding: '2px 8px', borderRadius: 12 }}>
+                        {ROLE_METIER_LABEL[c.role_metier] || c.role_metier || '—'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{c.nb_taches}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtH(c.budget_minutes)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtH(c.temps_realise_minutes)}</td>
+                    <td style={{ textAlign: 'right', color: '#15803d' }}>{fmtH(c.temps_valide_minutes)}</td>
+                    <td style={{ minWidth: 160 }}><UtilBar taux={c.taux_utilisation} /></td>
+                    <td style={{ textAlign: 'center', fontSize: 13 }}><FiabiliteIcon fiabilite={c.fiabilite} /></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      {/* Fiabilité legend */}
+      <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <span>Fiabilité = saisies validées / (validées + figées)</span>
+        <span>🟢 ≥ 80% · 🟡 50–79% · 🟠 &lt; 50%</span>
+      </div>
     </div>
   );
 }

@@ -66,6 +66,8 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  max-width: calc(100vw - var(--sidebar-width));
+  overflow-x: hidden;
 }
 
 .page-header {

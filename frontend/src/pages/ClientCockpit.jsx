@@ -2963,6 +2963,7 @@ export default function ClientCockpit() {
   const [error, setError] = useState('');
 
   const [client, setClient] = useState(null);
+  const [adjacent, setAdjacent] = useState({ prev: null, next: null });
   const [attributions, setAttributions] = useState([]);
   const [interactions, setInteractions] = useState([]);
   const [missions, setMissions] = useState([]);
@@ -3026,6 +3027,12 @@ export default function ClientCockpit() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    api.get(`/clients/${clientId}/adjacent`)
+      .then(r => setAdjacent(r.data))
+      .catch(() => {});
+  }, [clientId]);
+
   const reloadTaches = useCallback(async () => {
     const r = await api.get(`/taches?client_id=${clientId}`);
     setTaches(r.data);
@@ -3075,12 +3082,32 @@ export default function ClientCockpit() {
       <div style={{ background: 'linear-gradient(135deg, #0F1F4B 0%, #0a1835 100%)', padding: '20px 28px 0', color: '#fff' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <button
-              onClick={() => navigate('/clients')}
-              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px 10px', borderRadius: 4, fontSize: 12, marginBottom: 10 }}
-            >
-              ← Clients
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <button
+                onClick={() => navigate('/clients')}
+                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px 10px', borderRadius: 4, fontSize: 12 }}
+              >
+                ← Clients
+              </button>
+              {adjacent.prev && (
+                <button
+                  onClick={() => navigate(`/clients/${adjacent.prev.id}`)}
+                  title={adjacent.prev.nom}
+                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px 10px', borderRadius: 4, fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  ‹ {adjacent.prev.nom}
+                </button>
+              )}
+              {adjacent.next && (
+                <button
+                  onClick={() => navigate(`/clients/${adjacent.next.id}`)}
+                  title={adjacent.next.nom}
+                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px 10px', borderRadius: 4, fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {adjacent.next.nom} ›
+                </button>
+              )}
+            </div>
 
             {/* Title row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>

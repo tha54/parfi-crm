@@ -1,6 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import ProspectEditModal from '../components/ProspectEditModal';
+
+/* ─── Devis / LDM label helpers ──────────────────────────────────── */
+const DEVIS_LABELS = { brouillon: 'Brouillon', envoye: 'Envoyé', accepte: 'Signé', refuse: 'Refusé' };
+const LDM_LABELS   = { brouillon: 'Brouillon', envoyee: 'Envoyée', signee: 'Signée', archivee: 'Archivée' };
+const devisStatutLabel = s => DEVIS_LABELS[s] || s;
+const ldmStatutLabel   = s => LDM_LABELS[s] || s;
 
 /* ─── Column definitions ─────────────────────────────────────────── */
 const COLUMNS = [
@@ -9,7 +16,9 @@ const COLUMNS = [
   { statut: 'devis_fait',    label: 'Devis fait',        color: '#8b5cf6' },
   { statut: 'negociation',   label: 'Devis envoyé',      color: '#f59e0b' },
   { statut: 'devis_envoye',  label: 'Devis accepté',     color: '#10b981' },
-  { statut: 'gagne',         label: 'Client',            color: '#0f1f4b' },
+  { statut: 'devis_refuse',  label: 'Devis refusé',      color: '#ef4444' },
+  { statut: 'ldm_en_cours',  label: 'LDM en cours',      color: '#0891b2' },
+  { statut: 'ldm_signee',    label: 'LDM signée',        color: '#059669' },
 ];
 
 const STATUT_MAP = Object.fromEntries(COLUMNS.map(c => [c.statut, c]));
@@ -33,9 +42,9 @@ const fmtRelative = (dateStr) => {
 };
 
 /* ─── Opportunity Modal ──────────────────────────────────────────── */
-function OppModal({ opp, defaultStatut, contacts, intervenants, onSave, onClose }) {
+function OppModal({ opp, defaultStatut, contacts, intervenants, clients, onSave, onClose }) {
   const blank = {
-    contactId: '', titre: '', description: '',
+    contactId: '', client_id: '', titre: '', description: '',
     statut: defaultStatut || 'prospect',
     montantEstime: '', probabilite: 50,
     dateEcheance: '', intervenantId: '',
@@ -45,6 +54,7 @@ function OppModal({ opp, defaultStatut, contacts, intervenants, onSave, onClose 
       ? {
           ...opp,
           contactId: opp.contactId || '',
+          client_id: opp.client_id || '',
           montantEstime: opp.montantEstime ?? '',
           probabilite: opp.probabilite ?? 50,
           dateEcheance: opp.dateEcheance ? opp.dateEcheance.slice(0, 10) : '',
@@ -65,6 +75,8 @@ function OppModal({ opp, defaultStatut, contacts, intervenants, onSave, onClose 
         probabilite: Number(form.probabilite),
         intervenantId: form.intervenantId || null,
         dateEcheance: form.dateEcheance || null,
+        client_id: form.client_id || null,
+        contactId: form.contactId || null,
       };
       if (opp) await api.put(`/opportunites/${opp.id}`, payload);
       else await api.post('/opportunites', payload);
@@ -110,6 +122,16 @@ function OppModal({ opp, defaultStatut, contacts, intervenants, onSave, onClose 
               <select className="form-control" value={form.contactId} onChange={e => set('contactId', e.target.value)}>
                 <option value="">Sélectionner…</option>
                 {contacts.map(c => <option key={c.id} value={c.id}>{c.raisonSociale}</option>)}
+              </select>
+            </div>
+          )}
+
+          {clients && clients.length > 0 && (
+            <div className="form-group">
+              <label className="form-label">Client</label>
+              <select className="form-control" value={form.client_id} onChange={e => set('client_id', e.target.value)}>
+                <option value="">Sélectionner un client…</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.nom || c.raisonSociale}</option>)}
               </select>
             </div>
           )}
@@ -237,8 +259,298 @@ function ConvertirClientModal({ opp, onSave, onClose }) {
   );
 }
 
+/* ─── Nouveau prospect rapide ────────────────────────────────────── */
+function ProspectQuickModal({ onSave, onClose }) {
+  const [type, setType] = useState('particulier');
+  const [form, setForm] = useState({ nom: '', email: '', telephone: '', contact_prenom: '', contact_nom: '' });
+  const [search, setSearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const timerRef = useState(null);
+
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const doSearch = async (q) => {
+    if (q.trim().length < 2) { setSuggestions([]); return; }
+    setSearchLoading(true);
+    try {
+      const { data } = await api.get(`/pappers/search?q=${encodeURIComponent(q.trim())}`);
+      setSuggestions(data || []);
+    } catch { setSuggestions([]); }
+    finally { setSearchLoading(false); }
+  };
+
+  const handleSearchChange = e => {
+    const val = e.target.value;
+    setSearch(val);
+    if (timerRef[0]) clearTimeout(timerRef[0]);
+    timerRef[0] = setTimeout(() => doSearch(val), 380);
+  };
+
+  const handleSuggestionPick = r => {
+    setForm(f => ({
+      ...f,
+      nom: r.nom || f.nom,
+      siren: r.siren || '',
+      forme_juridique: r.forme_juridique || '',
+      adresse: r.adresse || '',
+      code_postal: r.code_postal || '',
+      ville: r.ville || '',
+    }));
+    setSearch(r.nom);
+    setSuggestions([]);
+  };
+
+  const handleSubmit = async e => {
+    e.preventDefault();
+    if (!form.nom.trim()) { setError('Le nom est requis'); return; }
+    if (!form.email && !form.telephone && !form.contact_email && !form.contact_telephone) {
+      setError('Un email ou un téléphone est requis'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      await api.post('/prospects', { ...form, type_prospect: type });
+      onSave();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Erreur lors de la création');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,31,75,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 10, width: '100%', maxWidth: 480, boxShadow: '0 20px 60px rgba(15,31,75,0.22)' }}
+        onClick={e => e.stopPropagation()}>
+
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid #dce6f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f1f4b', margin: 0 }}>Nouveau prospect</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#6b7c93' }}>×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: '20px 24px' }}>
+          {/* Type */}
+          <div className="form-group">
+            <label className="form-label">Type</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['particulier', 'entreprise'].map(t => (
+                <button key={t} type="button"
+                  onClick={() => { setType(t); setSearch(''); setSuggestions([]); }}
+                  style={{
+                    flex: 1, padding: '8px', borderRadius: 6, border: '1px solid',
+                    fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
+                    background: type === t ? '#0f1f4b' : '#fff',
+                    color: type === t ? '#fff' : '#6b7c93',
+                    borderColor: type === t ? '#0f1f4b' : '#dce6f0',
+                  }}>
+                  {t === 'particulier' ? '👤 Particulier' : '🏢 Entreprise'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Recherche entreprise */}
+          {type === 'entreprise' && (
+            <div className="form-group" style={{ position: 'relative' }}>
+              <label className="form-label">Rechercher l'entreprise</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="form-control" placeholder="Nom ou SIREN…" value={search}
+                  onChange={handleSearchChange} autoComplete="off" style={{ flex: 1 }} />
+                {searchLoading && <span style={{ alignSelf: 'center', color: '#9ca3af', fontSize: 12 }}>…</span>}
+              </div>
+              {suggestions.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', marginTop: 2 }}>
+                  {suggestions.map((r, i) => (
+                    <button key={r.siren || i} type="button" onClick={() => handleSuggestionPick(r)}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', borderBottom: i < suggestions.length - 1 ? '1px solid #f0f4f8' : 'none', cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{r.nom}</div>
+                      <div style={{ fontSize: 11, color: '#6b7c93', marginTop: 1 }}>
+                        {r.siren && <span>SIREN {r.siren}</span>}
+                        {r.forme_juridique && <span style={{ marginLeft: 8 }}>{r.forme_juridique}</span>}
+                        {r.ville && <span style={{ marginLeft: 8 }}>{r.code_postal} {r.ville}</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Nom */}
+          <div className="form-group">
+            <label className="form-label">{type === 'entreprise' ? 'Raison sociale *' : 'Nom *'}</label>
+            <input className="form-control" value={form.nom} onChange={set('nom')} required
+              placeholder={type === 'entreprise' ? 'Société XYZ' : 'Dupont Jean'} />
+          </div>
+
+          {/* Contact pour entreprise */}
+          {type === 'entreprise' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Prénom contact</label>
+                <input className="form-control" value={form.contact_prenom} onChange={set('contact_prenom')} placeholder="Jean" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Nom contact</label>
+                <input className="form-control" value={form.contact_nom} onChange={set('contact_nom')} placeholder="Dupont" />
+              </div>
+            </div>
+          )}
+
+          {/* Email + Téléphone */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Email</label>
+              <input type="email" className="form-control" value={form.email} onChange={set('email')} placeholder="contact@…" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Téléphone</label>
+              <input className="form-control" value={form.telephone} onChange={set('telephone')} placeholder="06 …" />
+            </div>
+          </div>
+
+          {error && <div style={{ background: '#fff0f0', border: '1px solid #fecaca', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: '#dc2626', marginBottom: 12 }}>{error}</div>}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 8, borderTop: '1px solid #edf2f7', marginTop: 4 }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Annuler</button>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
+              {saving ? 'Création…' : '+ Créer le prospect'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Card Action Modal (clic sur fiche) ────────────────────────── */
+const DEVIS_STATUT_LABEL = { brouillon: 'Brouillon', envoye: 'Envoyé', accepte: 'Accepté', refuse: 'Refusé' };
+
+function CardActionModal({ opp, onClose, onEditOpp, onEditProspect, navigate }) {
+  const [duplicating, setDuplicating] = useState(false);
+  const [dupErr, setDupErr] = useState('');
+  const token = localStorage.getItem('parfi_token');
+  const statut = opp.statut;
+
+  const handleDuplicate = async () => {
+    setDuplicating(true); setDupErr('');
+    try {
+      const { data } = await api.post(`/devis/${opp.devis_id}/dupliquer`);
+      navigate(`/devis/new?edit=${data.id}`);
+    } catch (e) {
+      setDupErr(e.response?.data?.message || 'Erreur lors de la duplication');
+      setDuplicating(false);
+    }
+  };
+
+  const btn = (icon, label, sublabel, onClick, opts = {}) => (
+    <button onClick={onClick} disabled={opts.disabled} style={{
+      display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+      padding: '12px 16px', background: opts.bg || '#fff', border: '1px solid',
+      borderColor: opts.border || '#dce6f0', borderRadius: 8,
+      cursor: opts.disabled ? 'not-allowed' : 'pointer', textAlign: 'left',
+      opacity: opts.disabled ? 0.45 : 1, transition: 'background 0.12s',
+    }}
+      onMouseEnter={e => { if (!opts.disabled) e.currentTarget.style.background = opts.hover || '#f0f4f8'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = opts.bg || '#fff'; }}>
+      <span style={{ fontSize: 18, flexShrink: 0 }}>{icon}</span>
+      <span>
+        <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: opts.color || '#0f1f4b' }}>{label}</span>
+        {sublabel && <span style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{sublabel}</span>}
+      </span>
+    </button>
+  );
+
+  /* ── Actions selon colonne ─────────────────────────────────────── */
+  const actions = [];
+
+  // Modifier le prospect — disponible dans toutes les colonnes si la fiche est un prospect
+  if (opp.prospect_id) {
+    actions.push(btn('👤', 'Modifier le prospect', 'Coordonnées, adresse, contact…',
+      () => { onClose(); onEditProspect(opp.prospect_id); },
+      { color: '#7c3aed', border: '#c4b5fd', bg: '#faf5ff', hover: '#f0e6ff' }));
+  }
+
+  if (statut === 'devis_fait') {
+    if (opp.devis_id) {
+      actions.push(btn('📄', 'Ouvrir le devis', 'Envoyer, modifier le statut…',
+        () => { onClose(); navigate(`/devis/${opp.devis_id}`); },
+        { color: '#0891b2', border: '#bae6fd', bg: '#f0f9ff', hover: '#e0f2fe' }));
+      actions.push(btn('✏️', 'Modifier le devis', opp.devis_numero || '',
+        () => { onClose(); navigate(`/devis/new?edit=${opp.devis_id}`); },
+        { color: '#d97706', border: '#fde68a', bg: '#fffbeb', hover: '#fef3c7' }));
+    } else {
+      const params = new URLSearchParams();
+      params.set('opp_id', opp.id);
+      if (opp.prospect_id) params.set('prospect_id', opp.prospect_id);
+      if (opp.contactNom) params.set('nom', opp.contactNom);
+      actions.push(btn('📄', 'Créer le devis', 'Aucun devis lié à cette opportunité',
+        () => { onClose(); navigate(`/devis/new?${params.toString()}`); },
+        { color: '#8b5cf6', border: '#c4b5fd', bg: '#faf5ff', hover: '#f0e6ff' }));
+    }
+  } else if (statut === 'negociation') {
+    if (opp.devis_id) {
+      actions.push(btn('📄', 'Ouvrir le devis', opp.devis_numero || '',
+        () => { onClose(); navigate(`/devis/${opp.devis_id}`); },
+        { color: '#0891b2', border: '#bae6fd', bg: '#f0f9ff', hover: '#e0f2fe' }));
+      if (opp.devis_statut === 'brouillon') {
+        actions.push(btn('✏️', 'Modifier le devis', opp.devis_numero || '',
+          () => { onClose(); navigate(`/devis/new?edit=${opp.devis_id}`); },
+          { color: '#d97706', border: '#fde68a', bg: '#fffbeb', hover: '#fef3c7' }));
+      } else {
+        actions.push(btn(
+          duplicating ? '⏳' : '📋',
+          'Dupliquer le devis',
+          'Crée un nouveau brouillon sur la base du précédent',
+          handleDuplicate,
+          { disabled: duplicating, color: '#d97706', border: '#fde68a', bg: '#fffbeb', hover: '#fef3c7' }));
+      }
+    }
+  } else if (['devis_envoye', 'ldm_en_cours', 'ldm_signee'].includes(statut)) {
+    if (opp.devis_id) {
+      actions.push(btn('📄', 'Ouvrir le devis', opp.devis_numero || '',
+        () => { onClose(); navigate(`/devis/${opp.devis_id}`); },
+        { color: '#0891b2', border: '#bae6fd', bg: '#f0f9ff', hover: '#e0f2fe' }));
+    }
+    if (opp.ldm_id) {
+      actions.push(btn('📋', 'Ouvrir la lettre de mission', opp.ldm_numero || '',
+        () => { onClose(); navigate(`/lettres-mission/${opp.ldm_id}`); },
+        { color: '#059669', border: '#6ee7b7', bg: '#f0fdf4', hover: '#dcfce7' }));
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,31,75,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 400, boxShadow: '0 20px 60px rgba(15,31,75,0.22)' }}
+        onClick={e => e.stopPropagation()}>
+
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #dce6f0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f1f4b' }}>{opp.contactNom || opp.titre}</div>
+            <div style={{ fontSize: 12, color: '#6b7c93', marginTop: 3 }}>
+              {opp.devis_numero
+                ? <span>{opp.devis_numero} · <span style={{ fontWeight: 600 }}>{DEVIS_STATUT_LABEL[opp.devis_statut] || opp.devis_statut}</span></span>
+                : <span style={{ fontStyle: 'italic' }}>Aucun devis</span>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9ca3af', lineHeight: 1, padding: '0 4px' }}>×</button>
+        </div>
+
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {actions}
+          {dupErr && <div style={{ fontSize: 12, color: '#dc2626', padding: '6px 10px', background: '#fef2f2', borderRadius: 6 }}>{dupErr}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Card "..." menu ────────────────────────────────────────────── */
-function CardMenu({ onEdit, onDelete }) {
+function CardMenu({ onEdit, onDelete, onEditProspect }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -257,13 +569,21 @@ function CardMenu({ onEdit, onDelete }) {
         title="Options"
       >···</button>
       {open && (
-        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 200, background: '#fff', borderRadius: 8, boxShadow: '0 8px 24px rgba(15,31,75,0.16)', border: '1px solid #dce6f0', minWidth: 130, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 200, background: '#fff', borderRadius: 8, boxShadow: '0 8px 24px rgba(15,31,75,0.16)', border: '1px solid #dce6f0', minWidth: 160, overflow: 'hidden' }}>
           <button
             onClick={e => { e.stopPropagation(); setOpen(false); onEdit(); }}
             style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#1a2a3a', textAlign: 'left' }}
             onMouseEnter={e => e.currentTarget.style.background = '#f0f4f8'}
             onMouseLeave={e => e.currentTarget.style.background = 'none'}
-          >✏️ Modifier</button>
+          >✏️ Modifier l'opportunité</button>
+          {onEditProspect && (
+            <button
+              onClick={e => { e.stopPropagation(); setOpen(false); onEditProspect(); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#8b5cf6', textAlign: 'left' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f5f0ff'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >📡 Modifier le prospect</button>
+          )}
           <button
             onClick={e => { e.stopPropagation(); setOpen(false); onDelete(); }}
             style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#ef4444', textAlign: 'left' }}
@@ -277,23 +597,28 @@ function CardMenu({ onEdit, onDelete }) {
 }
 
 /* ─── Kanban Card ────────────────────────────────────────────────── */
-function KanbanCard({ opp, isDragging, onEdit, onDelete, onDragStart, onDragEnd, onCreateDevis, onConvertirClient }) {
+function KanbanCard({ opp, isDragging, onEdit, onDelete, onDragStart, onDragEnd, onCreateDevis, onConvertirClient, onCardClick, onEditProspect }) {
   const rel = fmtRelative(opp.dateEcheance);
   const colColor = STATUT_MAP[opp.statut]?.color || '#9ca3af';
-  const showCreateDevis = (opp.statut === 'prospect' || opp.statut === 'qualification');
-  const showConvertir   = opp.statut === 'devis_envoye' && opp.prospect_id;
+  const showCreateDevis = !opp.devis_id && ['qualification', 'devis_fait'].includes(opp.statut);
+  const showConvertir   = ['devis_envoye', 'ldm_en_cours', 'ldm_signee'].includes(opp.statut) && opp.prospect_id;
+  const hasBrouillon    = opp.devis_statut === 'brouillon' && opp.devis_id;
+
+  // Distinguer drag vs clic
+  const dragged = useRef(false);
 
   return (
     <div
       draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onDragStart={e => { dragged.current = true; onDragStart(e); }}
+      onDragEnd={e => { onDragEnd(e); setTimeout(() => { dragged.current = false; }, 50); }}
+      onClick={() => { if (!dragged.current) onCardClick(opp); }}
       style={{
         background: '#fff', border: '1px solid #dce6f0', borderRadius: 8,
         padding: '12px 14px',
         boxShadow: isDragging ? 'none' : '0 1px 4px rgba(15,31,75,0.08)',
         opacity: isDragging ? 0.45 : 1,
-        cursor: 'grab', userSelect: 'none',
+        cursor: hasBrouillon ? 'pointer' : 'grab', userSelect: 'none',
         transition: 'box-shadow 0.15s, opacity 0.15s',
         position: 'relative',
       }}
@@ -305,7 +630,7 @@ function KanbanCard({ opp, isDragging, onEdit, onDelete, onDragStart, onDragEnd,
         <span style={{ fontWeight: 600, fontSize: 13, color: '#0f1f4b', lineHeight: 1.3, flex: 1 }}>
           {opp.titre}
         </span>
-        <CardMenu onEdit={onEdit} onDelete={onDelete} />
+        <CardMenu onEdit={onEdit} onDelete={onDelete} onEditProspect={opp.prospect_id ? () => onEditProspect(opp.prospect_id) : null} />
       </div>
 
       {/* Contact name */}
@@ -316,6 +641,31 @@ function KanbanCard({ opp, isDragging, onEdit, onDelete, onDragStart, onDragEnd,
             <span style={{ marginLeft: 6, fontSize: 10, background: '#8b5cf620', color: '#8b5cf6', border: '1px solid #8b5cf640', borderRadius: 10, padding: '1px 6px', fontWeight: 600 }}>
               Prospect
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Devis / LDM badges */}
+      {(opp.devis_numero || opp.ldm_numero) && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          {opp.devis_numero && (
+            <a href={opp.devis_statut === 'brouillon' ? `/devis/new?edit=${opp.devis_id}` : `/devis/${opp.devis_id}`}
+               onClick={e => e.stopPropagation()}
+               style={{ fontSize: 11, fontWeight: 600, color: '#8b5cf6', background: '#8b5cf610',
+                        border: '1px solid #8b5cf640', borderRadius: 10, padding: '2px 8px',
+                        textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              {opp.devis_statut === 'brouillon' ? '✏️' : '📄'} {opp.devis_numero}
+              {opp.devis_statut && <span style={{ opacity: 0.7 }}>· {devisStatutLabel(opp.devis_statut)}</span>}
+            </a>
+          )}
+          {opp.ldm_numero && (
+            <a href={`/lettres-mission/${opp.ldm_id}`} onClick={e => e.stopPropagation()}
+               style={{ fontSize: 11, fontWeight: 600, color: '#0891b2', background: '#0891b210',
+                        border: '1px solid #0891b240', borderRadius: 10, padding: '2px 8px',
+                        textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+              📋 {opp.ldm_numero}
+              {opp.ldm_statut && <span style={{ opacity: 0.7 }}>· {ldmStatutLabel(opp.ldm_statut)}</span>}
+            </a>
           )}
         </div>
       )}
@@ -384,7 +734,7 @@ function KanbanCard({ opp, isDragging, onEdit, onDelete, onDragStart, onDragEnd,
 }
 
 /* ─── Kanban Column ──────────────────────────────────────────────── */
-function KanbanColumn({ col, cards, dragOverCol, onDragOver, onDrop, onDragLeave, onAddCard, onEditCard, onDeleteCard, onCardDragStart, onCardDragEnd, draggingId, onCreateDevis, onConvertirClient }) {
+function KanbanColumn({ col, cards, dragOverCol, onDragOver, onDrop, onDragLeave, onAddCard, onEditCard, onDeleteCard, onCardDragStart, onCardDragEnd, draggingId, onCreateDevis, onConvertirClient, onCardClick, onEditProspect }) {
   const total = cards.reduce((s, c) => s + (Number(c.montantEstime) || 0), 0);
   const isTarget = dragOverCol === col.statut;
 
@@ -438,6 +788,8 @@ function KanbanColumn({ col, cards, dragOverCol, onDragOver, onDrop, onDragLeave
             onDragEnd={onCardDragEnd}
             onCreateDevis={onCreateDevis}
             onConvertirClient={onConvertirClient}
+            onCardClick={onCardClick}
+            onEditProspect={onEditProspect}
           />
         ))}
         {isTarget && draggingId && (
@@ -463,6 +815,7 @@ export default function Pipeline() {
   const [tauxConversion, setTauxConversion] = useState(0);
   const [contacts, setContacts] = useState([]);
   const [intervenants, setIntervenants] = useState([]);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Drag state
@@ -472,15 +825,19 @@ export default function Pipeline() {
   // Modal state
   const [modal, setModal] = useState(null); // null | { mode: 'create', statut } | { mode: 'edit', opp }
   const [convertirModal, setConvertirModal] = useState(null); // null | opp
+  const [prospectModal, setProspectModal] = useState(false);
+  const [editProspectId, setEditProspectId] = useState(null);
+  const [cardActionModal, setCardActionModal] = useState(null); // null | opp
 
   /* Load data */
   const load = async () => {
     setLoading(true);
     try {
-      const [oRes, cRes, iRes] = await Promise.all([
+      const [oRes, cRes, iRes, clRes] = await Promise.all([
         api.get('/opportunites'),
         api.get('/contacts?type=prospect').catch(() => ({ data: [] })),
         api.get('/intervenants?actif=true').catch(() => ({ data: [] })),
+        api.get('/clients').catch(() => ({ data: [] })),
       ]);
       const d = oRes.data;
       setOpportunites(d.opportunites || []);
@@ -489,6 +846,7 @@ export default function Pipeline() {
       setTauxConversion(d.tauxConversion || 0);
       setContacts(cRes.data || []);
       setIntervenants(iRes.data || []);
+      setClients(Array.isArray(clRes.data) ? clRes.data : []);
     } catch (err) {
       console.error('Erreur chargement pipeline:', err);
     } finally {
@@ -509,14 +867,18 @@ export default function Pipeline() {
     }
   };
 
+  /* Clic sur une fiche : ouvre le panneau d'actions */
+  const handleCardClick = useCallback((opp) => {
+    setCardActionModal(opp);
+  }, []);
+
   /* "Créer un devis" from pipeline card */
   const handleCreateDevis = (opp) => {
     const params = new URLSearchParams();
-    params.set('new', '1');
     params.set('opp_id', opp.id);
     if (opp.prospect_id) params.set('prospect_id', opp.prospect_id);
     if (opp.contactNom) params.set('nom', opp.contactNom);
-    navigate(`/devis?${params.toString()}`);
+    navigate(`/devis/new?${params.toString()}`);
   };
 
   /* Drag handlers */
@@ -532,8 +894,8 @@ export default function Pipeline() {
     const opp = opportunites.find(o => o.id === draggingId);
     if (!opp || opp.statut === targetStatut) { setDraggingId(null); return; }
 
-    // Dragging to "Client" column: trigger conversion modal
-    if (targetStatut === 'gagne' && opp.prospect_id) {
+    // Dragging to "LDM signée": trigger conversion prospect → client
+    if (targetStatut === 'ldm_signee' && opp.prospect_id) {
       setDraggingId(null);
       setConvertirModal(opp);
       return;
@@ -570,8 +932,8 @@ export default function Pipeline() {
             {opportunites.length} opportunité{opportunites.length !== 1 ? 's' : ''} · Vue Kanban
           </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ mode: 'create', statut: 'prospect' })}>
-          + Nouvelle opportunité
+        <button className="btn btn-primary" onClick={() => setProspectModal(true)}>
+          + Nouveau prospect
         </button>
       </div>
 
@@ -616,6 +978,8 @@ export default function Pipeline() {
                 onCardDragEnd={handleCardDragEnd}
                 onCreateDevis={handleCreateDevis}
                 onConvertirClient={opp => setConvertirModal(opp)}
+                onCardClick={handleCardClick}
+                onEditProspect={setEditProspectId}
               />
             ))}
           </div>
@@ -629,6 +993,7 @@ export default function Pipeline() {
           defaultStatut={modal.mode === 'create' ? modal.statut : undefined}
           contacts={contacts}
           intervenants={intervenants}
+          clients={clients}
           onSave={() => { setModal(null); load(); }}
           onClose={() => setModal(null)}
         />
@@ -640,6 +1005,34 @@ export default function Pipeline() {
           opp={convertirModal}
           onSave={() => { setConvertirModal(null); load(); }}
           onClose={() => setConvertirModal(null)}
+        />
+      )}
+
+      {/* Nouveau prospect modal */}
+      {prospectModal && (
+        <ProspectQuickModal
+          onSave={() => { setProspectModal(false); load(); }}
+          onClose={() => setProspectModal(false)}
+        />
+      )}
+
+      {/* Édition fiche prospect */}
+      {editProspectId && (
+        <ProspectEditModal
+          prospectId={editProspectId}
+          onSaved={() => { setEditProspectId(null); load(); }}
+          onClose={() => setEditProspectId(null)}
+        />
+      )}
+
+      {/* Actions fiche (clic carte) */}
+      {cardActionModal && (
+        <CardActionModal
+          opp={cardActionModal}
+          onClose={() => setCardActionModal(null)}
+          onEditOpp={opp => { setCardActionModal(null); setModal({ mode: 'edit', opp }); }}
+          onEditProspect={id => { setCardActionModal(null); setEditProspectId(id); }}
+          navigate={navigate}
         />
       )}
     </div>

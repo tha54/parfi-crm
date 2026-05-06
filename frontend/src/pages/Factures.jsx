@@ -1,9 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
-const STATUTS = { brouillon: 'Brouillon', envoyee: 'Envoyée', payee: 'Payée', partielle: 'Partielle', retard: 'En retard', annulee: 'Annulée' };
-const STATUT_COLORS = { brouillon: 'autre', envoyee: 'en_cours', payee: 'termine', partielle: 'responsable', retard: 'reporte', annulee: 'inactif' };
+const STATUTS = {
+  brouillon: 'Brouillon', vu: 'Validé', emise: 'Émise',
+  envoyee: 'Envoyée', payee: 'Payée', partielle: 'Partielle',
+  retard: 'En retard', annulee: 'Annulée',
+};
+const STATUT_COLORS = {
+  brouillon: 'autre', vu: 'en_cours', emise: 'responsable',
+  envoyee: 'en_cours', payee: 'termine', partielle: 'responsable',
+  retard: 'reporte', annulee: 'inactif',
+};
 
 function StatutBadge({ s }) {
   return <span className={`badge badge-${STATUT_COLORS[s] || 'autre'}`}>{STATUTS[s] || s}</span>;
@@ -13,322 +21,506 @@ function fmt(v) {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0);
 }
 
-const emptyLigne = () => ({ description: '', quantite: 1, prixUnitaireHT: 0, remisePct: 0, totalHT: 0 });
-
-function calcLigne(l) {
-  const total = parseFloat(l.quantite || 0) * parseFloat(l.prixUnitaireHT || 0) * (1 - parseFloat(l.remisePct || 0) / 100);
-  return { ...l, totalHT: Math.round(total * 100) / 100 };
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function calcTotaux(lignes, tauxTVA) {
-  const totalHT = lignes.reduce((s, l) => s + parseFloat(l.totalHT || 0), 0);
-  const totalTVA = totalHT * (parseFloat(tauxTVA) / 100);
-  return { totalHT: Math.round(totalHT * 100) / 100, totalTVA: Math.round(totalTVA * 100) / 100, totalTTC: Math.round((totalHT + totalTVA) * 100) / 100 };
+function fmtMois(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 }
+
+// ─── Drawer détail ─────────────────────────────────────────────────────────
+
+function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
+  const [f, setF] = useState(null);
+  const [aide, setAide] = useState(null);
+  const [showAide, setShowAide] = useState(false);
+  const [motifAnnul, setMotifAnnul] = useState('');
+  const [showAnnulForm, setShowAnnulForm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    const r = await api.get(`/factures/${factureId}`);
+    setF(r.data);
+  }, [factureId]);
+
+  useEffect(() => { if (factureId) load(); }, [factureId, load]);
+
+  const action = async (endpoint, body) => {
+    setBusy(true); setErr('');
+    try {
+      await api.post(`/factures/${factureId}/${endpoint}`, body || {});
+      await load();
+      onRefresh();
+    } catch (e) { setErr(e.response?.data?.message || 'Erreur'); }
+    finally { setBusy(false); }
+  };
+
+  const loadAide = async () => {
+    if (aide) { setShowAide(s => !s); return; }
+    try {
+      const r = await api.get(`/factures/${factureId}/aide-decision`);
+      setAide(r.data); setShowAide(true);
+    } catch { setErr('Impossible de charger l\'aide à la décision'); }
+  };
+
+  if (!f) return (
+    <div className="drawer-overlay" onClick={onClose}>
+      <div className="drawer" style={{ width: 520 }} onClick={e => e.stopPropagation()}>
+        <div className="drawer-header"><h3>Chargement…</h3></div>
+      </div>
+    </div>
+  );
+
+  const isExpert = canEdit;
+  const isDraft = ['brouillon', 'vu'].includes(f.statut);
+
+  return (
+    <div className="drawer-overlay" onClick={onClose}>
+      <div className="drawer" style={{ width: 580 }} onClick={e => e.stopPropagation()}>
+        <div className="drawer-header">
+          <h3>
+            {f.numero_fiscal ? `${f.numero_fiscal}` : f.numero}
+            {f.numero_fiscal && <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 6 }}>({f.numero})</span>}
+          </h3>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="drawer-body" style={{ overflowY: 'auto' }}>
+          {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+
+          {/* En-tête */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Client</div><strong>{f.client_nom || '—'}</strong></div>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Statut</div><StatutBadge s={f.statut} /></div>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Mois</div>{fmtMois(f.mois_facturation)}</div>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>LDM</div>{f.ldm_numero || '—'}</div>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Collaborateur</div>{f.collab_prenom ? `${f.collab_prenom} ${f.collab_nom}` : '—'}</div>
+          </div>
+
+          {/* Montants */}
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Total HT</span>
+              <strong>{fmt(f.totalHT)}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>TVA {f.tauxTVA}%</span>
+              <span>{fmt(f.totalTVA)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+              <strong>Total TTC</strong>
+              <strong style={{ fontSize: 18 }}>{fmt(f.totalTTC)}</strong>
+            </div>
+          </div>
+
+          {/* Dates */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16, fontSize: 13 }}>
+            <div><span style={{ color: 'var(--text-secondary)' }}>Émission prévue:</span> {fmtDate(f.date_emission_prevue)}</div>
+            <div><span style={{ color: 'var(--text-secondary)' }}>Émis le:</span> {fmtDate(f.date_emission_effective)}</div>
+            <div><span style={{ color: 'var(--text-secondary)' }}>Échéance:</span> {fmtDate(f.dateEcheance)}</div>
+            <div><span style={{ color: 'var(--text-secondary)' }}>Payé le:</span> {fmtDate(f.datePaiement)}</div>
+          </div>
+
+          {/* Lignes */}
+          {f.lignes?.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Prestations</div>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ textAlign: 'left', padding: '4px 0' }}>Description</th>
+                    <th style={{ textAlign: 'right', padding: '4px 8px' }}>Qté</th>
+                    <th style={{ textAlign: 'right', padding: '4px 0' }}>PU HT</th>
+                    <th style={{ textAlign: 'right', padding: '4px 0' }}>Total HT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {f.lignes.map((l, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border-light, #f0f0f0)' }}>
+                      <td style={{ padding: '6px 0' }}>{l.description}</td>
+                      <td style={{ textAlign: 'right', padding: '6px 8px' }}>{l.quantite}</td>
+                      <td style={{ textAlign: 'right', padding: '6px 0' }}>{fmt(l.prixUnitaireHT)}</td>
+                      <td style={{ textAlign: 'right', padding: '6px 0' }}>{fmt(l.totalHT)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Motif modification */}
+          {f.motif_modification && (
+            <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 12 }}>
+              <strong>Motif de modification:</strong> {f.motif_modification}
+            </div>
+          )}
+
+          {/* Actions */}
+          {isExpert && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+              {f.statut === 'brouillon' && (
+                <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => action('marquer-vu')}>
+                  ✅ Valider brouillon
+                </button>
+              )}
+              {['brouillon', 'vu'].includes(f.statut) && (
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => action('emettre')}>
+                  🚀 Émettre
+                </button>
+              )}
+              {['emise', 'envoyee', 'retard'].includes(f.statut) && (
+                <button className="btn btn-success btn-sm" disabled={busy} onClick={() => action('marquer-payee')}>
+                  💰 Marquer payée
+                </button>
+              )}
+              {!['payee', 'annulee'].includes(f.statut) && (
+                showAnnulForm ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      className="form-control form-control-sm"
+                      style={{ width: 200 }}
+                      placeholder="Motif d'annulation"
+                      value={motifAnnul}
+                      onChange={e => setMotifAnnul(e.target.value)}
+                    />
+                    <button className="btn btn-danger btn-sm" disabled={busy || !motifAnnul}
+                      onClick={() => action('annuler', { motif: motifAnnul })}>
+                      Confirmer
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowAnnulForm(false)}>✕</button>
+                  </div>
+                ) : (
+                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }}
+                    onClick={() => setShowAnnulForm(true)}>
+                    🚫 Annuler
+                  </button>
+                )
+              )}
+              <a href={`/api/factures/${factureId}/pdf?token=${localStorage.getItem('token')}`}
+                target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+                📄 PDF
+              </a>
+            </div>
+          )}
+
+          {/* Aide à la décision */}
+          <div>
+            <button className="btn btn-ghost btn-sm" onClick={loadAide} style={{ marginBottom: 8 }}>
+              {showAide ? '▲' : '▼'} Aide à la décision
+            </button>
+            {showAide && aide && (
+              <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 12, fontSize: 13 }}>
+                {/* Section A */}
+                <div style={{ marginBottom: 12 }}>
+                  <strong>{aide.sectionA.label}</strong>
+                  <div style={{ display: 'flex', gap: 24, marginTop: 8, flexWrap: 'wrap' }}>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Temps:</span>
+                      <strong style={{ marginLeft: 4 }}>{Math.round(aide.sectionA.tempsTotalMinutes / 6) / 10}h</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Valorisé:</span>
+                      <strong style={{ marginLeft: 4 }}>{fmt(aide.sectionA.valeurTotale)}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Budget LDM:</span>
+                      <strong style={{ marginLeft: 4 }}>{fmt(aide.sectionA.budgetLDM)}</strong>
+                    </div>
+                    {aide.sectionA.depassementPct !== null && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)' }}>Écart:</span>
+                        <strong style={{
+                          marginLeft: 4,
+                          color: aide.sectionA.depassementPct > 20 ? 'var(--danger)' : aide.sectionA.depassementPct > 0 ? 'var(--warning)' : 'var(--success)',
+                        }}>
+                          {aide.sectionA.depassementPct > 0 ? '+' : ''}{aide.sectionA.depassementPct}%
+                        </strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Section B */}
+                {aide.sectionB.taches?.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <strong>{aide.sectionB.label}</strong>
+                    <ul style={{ marginTop: 6, paddingLeft: 16 }}>
+                      {aide.sectionB.taches.slice(0, 5).map((t, i) => (
+                        <li key={i} style={{ marginBottom: 2 }}>
+                          {t.titre}
+                          {t.temps_passe_minutes > 0 && (
+                            <span style={{ color: 'var(--text-secondary)', marginLeft: 6 }}>
+                              ({Math.round(t.temps_passe_minutes / 6) / 10}h)
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Section C */}
+                {aide.sectionC.historique?.length > 0 && (
+                  <div>
+                    <strong>{aide.sectionC.label}</strong>
+                    <table style={{ width: '100%', marginTop: 6, fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ color: 'var(--text-secondary)' }}>
+                          <th style={{ textAlign: 'left' }}>Mois</th>
+                          <th style={{ textAlign: 'right' }}>HT</th>
+                          <th style={{ textAlign: 'center' }}>Statut</th>
+                          <th style={{ textAlign: 'center' }}>Payé le</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {aide.sectionC.historique.map((h, i) => (
+                          <tr key={i}>
+                            <td>{fmtMois(h.mois_facturation)}</td>
+                            <td style={{ textAlign: 'right' }}>{fmt(h.totalHT)}</td>
+                            <td style={{ textAlign: 'center' }}><StatutBadge s={h.statut} /></td>
+                            <td style={{ textAlign: 'center' }}>{fmtDate(h.datePaiement)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Historique événements */}
+          {f.evenements?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>Historique</div>
+              {f.evenements.map((e, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, fontSize: 12 }}>
+                  <span style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    {new Date(e.date).toLocaleDateString('fr-FR')}
+                  </span>
+                  <span>{e.description}</span>
+                  {e.prenom && <span style={{ color: 'var(--text-secondary)' }}>— {e.prenom} {e.nom}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page principale ──────────────────────────────────────────────────────────
 
 export default function Factures() {
   const { user } = useAuth();
   const [factures, setFactures] = useState([]);
-  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ client_id: '', type: 'facture', dateEcheance: '', tauxTVA: '20', notesInternes: '', lignes: [emptyLigne()] });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
+  const [filterMois, setFilterMois] = useState('');
+  const [selectedId, setSelectedId] = useState(null);
+  const [sepaMonth, setSepaMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [sepaExporting, setSepaExporting] = useState(false);
+  const [depassements, setDepassements] = useState([]);
+  const [showDepassements, setShowDepassements] = useState(false);
 
   const canEdit = ['expert', 'chef_mission'].includes(user?.role);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filterStatut) params.statut = filterStatut;
+      if (filterMois) params.mois = filterMois;
+      const r = await api.get('/factures', { params });
+      setFactures(r.data);
+    } finally { setLoading(false); }
+  }, [filterStatut, filterMois]);
+
+  useEffect(() => { load(); }, [load]);
+
   useEffect(() => {
-    Promise.all([
-      api.get('/factures').then(r => setFactures(r.data)),
-      api.get('/clients').then(r => setClients(r.data)),
-    ]).finally(() => setLoading(false));
-  }, []);
+    if (canEdit) {
+      api.get('/factures/depassements').then(r => setDepassements(r.data)).catch(() => {});
+    }
+  }, [canEdit]);
 
-  const reload = () => api.get('/factures').then(r => setFactures(r.data));
-
-  const openCreate = () => {
-    const today = new Date();
-    const echeance = new Date(today); echeance.setDate(today.getDate() + 30);
-    setForm({ client_id: '', type: 'facture', dateEcheance: echeance.toISOString().substring(0, 10), tauxTVA: '20', notesInternes: '', lignes: [emptyLigne()] });
-    setErr(''); setModal('create');
-  };
-
-  const openEdit = (f) => {
-    setForm({ client_id: f.client_id || '', type: f.type || 'facture', dateEcheance: f.dateEcheance ? f.dateEcheance.substring(0, 10) : '', tauxTVA: String(f.tauxTVA || 20), notesInternes: f.notesInternes || '', lignes: [emptyLigne()] });
-    setErr(''); setModal(f);
-  };
-
-  const setLigne = (i, field, val) => {
-    setForm(f => ({ ...f, lignes: f.lignes.map((l, idx) => idx === i ? calcLigne({ ...l, [field]: val }) : l) }));
-  };
-
-  const addLigne = () => setForm(f => ({ ...f, lignes: [...f.lignes, emptyLigne()] }));
-  const removeLigne = (i) => setForm(f => ({ ...f, lignes: f.lignes.filter((_, idx) => idx !== i) }));
-
-  const totaux = calcTotaux(form.lignes, form.tauxTVA);
-
-  const save = async () => {
-    if (!form.client_id) { setErr('Client requis'); return; }
-    setSaving(true); setErr('');
+  const handleSepaExport = async () => {
+    setSepaExporting(true);
     try {
-      const payload = { ...form, ...totaux };
-      if (modal === 'create') await api.post('/factures', payload);
-      else await api.put(`/factures/${modal.id}`, payload);
-      await reload(); setModal(null);
-    } catch (e) { setErr(e.response?.data?.message || 'Erreur'); }
-    finally { setSaving(false); }
-  };
-
-  const marquerPayee = async (f) => {
-    try {
-      await api.put(`/factures/${f.id}`, { statut: 'payee', datePaiement: new Date().toISOString().substring(0, 10), montantPaye: f.totalTTC });
-      await reload();
-    } catch { alert('Erreur'); }
-  };
-
-  const changeStatut = async (f, statut) => {
-    try { await api.put(`/factures/${f.id}`, { statut }); await reload(); }
-    catch { alert('Erreur'); }
-  };
-
-  const del = async (f) => {
-    if (!confirm(`Supprimer la facture ${f.numero} ?`)) return;
-    try { await api.delete(`/factures/${f.id}`); await reload(); }
-    catch { alert('Erreur'); }
+      const r = await api.post('/factures/sepa-export', { mois: sepaMonth }, { responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `sepa-${sepaMonth}.xml`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert('Aucune facture éligible ce mois'); }
+    finally { setSepaExporting(false); }
   };
 
   const filtered = factures.filter(f => {
+    if (!search) return true;
     const q = search.toLowerCase();
-    const matchSearch = !q || f.numero?.toLowerCase().includes(q) || f.client_nom?.toLowerCase().includes(q);
-    const matchStatut = !filterStatut || f.statut === filterStatut;
-    return matchSearch && matchStatut;
+    return (
+      (f.client_nom || '').toLowerCase().includes(q) ||
+      (f.numero || '').toLowerCase().includes(q) ||
+      (f.numero_fiscal || '').toLowerCase().includes(q)
+    );
   });
 
-  const caEncaisse = factures.filter(f => f.statut === 'payee').reduce((s, f) => s + parseFloat(f.totalTTC || 0), 0);
-  const caEnAttente = factures.filter(f => ['envoyee', 'partielle'].includes(f.statut)).reduce((s, f) => s + parseFloat(f.totalTTC || 0), 0);
-  const caRetard = factures.filter(f => f.statut === 'retard').reduce((s, f) => s + parseFloat(f.totalTTC || 0), 0);
-
-  if (loading) return <div className="spinner"><div className="spinner-ring" /></div>;
+  // Stats
+  const stats = {
+    total:     filtered.length,
+    brouillon: filtered.filter(f => ['brouillon', 'vu'].includes(f.statut)).length,
+    aEmettre:  filtered.filter(f => f.statut === 'vu').length,
+    emises:    filtered.filter(f => ['emise', 'envoyee'].includes(f.statut)).length,
+    retard:    filtered.filter(f => f.statut === 'retard').length,
+    caHT:      filtered.filter(f => !['annulee', 'brouillon'].includes(f.statut)).reduce((s, f) => s + Number(f.totalHT), 0),
+  };
 
   return (
-    <>
+    <div className="page-container">
       <div className="page-header">
-        <h1>Factures</h1>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {canEdit && <button className="btn btn-primary" onClick={openCreate}>+ Nouvelle facture</button>}
+        <div>
+          <h1 className="page-title">Factures</h1>
+          <p className="page-subtitle">Gestion de la facturation récurrente</p>
         </div>
-      </div>
-
-      <div className="page-body">
-        {/* KPI résumé */}
-        <div className="kpi-grid" style={{ marginBottom: 20 }}>
-          <div className="kpi-card" style={{ borderTop: '3px solid #00897b' }}>
-            <span className="kpi-icon">💚</span>
-            <div><div className="kpi-value" style={{ color: '#00897b' }}>{fmt(caEncaisse)}</div><div className="kpi-label">CA encaissé</div></div>
-          </div>
-          <div className="kpi-card" style={{ borderTop: '3px solid #00b4d8' }}>
-            <span className="kpi-icon">⏳</span>
-            <div><div className="kpi-value" style={{ color: '#00b4d8' }}>{fmt(caEnAttente)}</div><div className="kpi-label">En attente</div></div>
-          </div>
-          {caRetard > 0 && (
-            <div className="kpi-card" style={{ borderTop: '3px solid #d63031' }}>
-              <span className="kpi-icon">⚠️</span>
-              <div><div className="kpi-value" style={{ color: '#d63031' }}>{fmt(caRetard)}</div><div className="kpi-label">En retard</div></div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {canEdit && depassements.length > 0 && (
+            <button className="btn btn-sm" style={{ background: '#fff3cd', color: '#856404', border: '1px solid #ffc107' }}
+              onClick={() => setShowDepassements(s => !s)}>
+              ⚠️ {depassements.length} dépassement{depassements.length > 1 ? 's' : ''}
+            </button>
+          )}
+          {canEdit && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="month" className="form-control form-control-sm" style={{ width: 150 }}
+                value={sepaMonth} onChange={e => setSepaMonth(e.target.value)} />
+              <button className="btn btn-ghost btn-sm" onClick={handleSepaExport} disabled={sepaExporting}>
+                {sepaExporting ? '…' : '🏦'} SEPA
+              </button>
             </div>
           )}
-          <div className="kpi-card" style={{ borderTop: '3px solid var(--primary)' }}>
-            <span className="kpi-icon">📊</span>
-            <div><div className="kpi-value">{factures.length}</div><div className="kpi-label">Factures total</div></div>
-          </div>
-        </div>
-
-        {/* Filtres */}
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div className="card-body" style={{ paddingTop: 14, paddingBottom: 14 }}>
-            <div className="filters-bar">
-              <input className="form-control search-input" placeholder="Rechercher (n°, client)…" value={search} onChange={e => setSearch(e.target.value)} />
-              <select className="form-control" style={{ width: 160 }} value={filterStatut} onChange={e => setFilterStatut(e.target.value)}>
-                <option value="">Tous les statuts</option>
-                {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-body" style={{ padding: 0 }}>
-            {filtered.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-state-icon">🧾</div>
-                <p>Aucune facture{search || filterStatut ? ' pour ces filtres' : ''}</p>
-                {canEdit && !search && !filterStatut && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={openCreate}>Créer la première facture</button>}
-              </div>
-            ) : (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>N°</th>
-                      <th>Client</th>
-                      <th>Type</th>
-                      <th>Statut</th>
-                      <th>Total HT</th>
-                      <th>Total TTC</th>
-                      <th>Échéance</th>
-                      {canEdit && <th>Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map(f => {
-                      const enRetard = f.statut === 'retard' || (f.statut === 'envoyee' && f.dateEcheance && new Date(f.dateEcheance) < new Date());
-                      return (
-                        <tr key={f.id} style={enRetard ? { background: '#fff5f5' } : {}}>
-                          <td><code style={{ fontSize: 12 }}>{f.numero}</code></td>
-                          <td>{f.client_nom || <span className="text-muted">—</span>}</td>
-                          <td><span className="badge badge-assistant" style={{ textTransform: 'capitalize' }}>{f.type}</span></td>
-                          <td><StatutBadge s={f.statut} /></td>
-                          <td>{fmt(f.totalHT)}</td>
-                          <td><strong style={{ color: enRetard ? 'var(--danger)' : 'inherit' }}>{fmt(f.totalTTC)}</strong></td>
-                          <td>
-                            <span style={{ color: enRetard ? 'var(--danger)' : 'inherit', fontWeight: enRetard ? 600 : 400 }}>
-                              {f.dateEcheance ? new Date(f.dateEcheance).toLocaleDateString('fr-FR') : '—'}
-                            </span>
-                          </td>
-                          {canEdit && (
-                            <td>
-                              <div className="td-actions">
-                                {f.statut !== 'payee' && f.statut !== 'annulee' && (
-                                  <button className="btn btn-ghost btn-sm" style={{ color: '#00897b', borderColor: '#00897b' }} onClick={() => marquerPayee(f)}>✓ Payée</button>
-                                )}
-                                <select className="form-control" style={{ width: 120, fontSize: 12, padding: '4px 8px' }}
-                                  value={f.statut} onChange={e => changeStatut(f, e.target.value)}>
-                                  {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                                </select>
-                                  <button className="btn btn-ghost btn-sm" title="Télécharger PDF Factur-X"
-                                  onClick={() => window.open(`/api/factures/${f.id}/pdf`, '_blank')}>📄 PDF</button>
-                                <button className="btn btn-ghost btn-sm" title="Télécharger XML Factur-X"
-                                  onClick={() => window.open(`/api/factures/${f.id}/facturx-xml`, '_blank')}>🔖 XML</button>
-                                <button className="btn btn-ghost btn-sm" onClick={() => openEdit(f)}>✏️</button>
-                                {user?.role === 'expert' && <button className="btn btn-danger btn-sm" onClick={() => del(f)}>🗑</button>}
-                              </div>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
-      {modal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
-          <div className="modal" style={{ maxWidth: 700 }}>
-            <div className="modal-header">
-              <span className="modal-title">{modal === 'create' ? 'Nouvelle facture' : `Modifier ${modal.numero}`}</span>
-              <button className="modal-close" onClick={() => setModal(null)}>×</button>
-            </div>
-            <div className="modal-body">
-              {err && <div className="alert alert-error">{err}</div>}
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Client *</label>
-                  <select className="form-control" value={form.client_id} onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))}>
-                    <option value="">Sélectionner un client</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Type</label>
-                  <select className="form-control" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-                    <option value="facture">Facture</option>
-                    <option value="acompte">Acompte</option>
-                    <option value="solde">Solde</option>
-                    <option value="avoir">Avoir</option>
-                  </select>
-                </div>
+      {/* Alerte dépassements */}
+      {showDepassements && depassements.length > 0 && (
+        <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+          <strong style={{ display: 'block', marginBottom: 8 }}>⚠️ Clients avec dépassement budgétaire (mois précédent)</strong>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {depassements.map((d, i) => (
+              <div key={i} style={{ background: '#fff', borderRadius: 6, padding: '6px 10px', fontSize: 12, border: '1px solid #ffc107' }}>
+                <strong>{d.client_nom}</strong>
+                <span style={{ color: '#dc3545', marginLeft: 6 }}>+{d.depassementPct}%</span>
+                <span style={{ color: '#6c757d', marginLeft: 6 }}>{fmt(d.valeurReelle)} / {fmt(d.budgetMois)}</span>
               </div>
-              <div className="form-group">
-                <label className="form-label">Date d'échéance</label>
-                <input type="date" className="form-control" value={form.dateEcheance} onChange={e => setForm(f => ({ ...f, dateEcheance: e.target.value }))} />
-              </div>
-
-              {/* Lignes */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <label className="form-label" style={{ margin: 0 }}>Lignes de facturation</label>
-                  <button className="btn btn-ghost btn-sm" onClick={addLigne}>+ Ligne</button>
-                </div>
-                <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: 'var(--bg)' }}>
-                        <th style={{ padding: '8px 10px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left' }}>Description</th>
-                        <th style={{ padding: '8px 6px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', width: 70 }}>Qté</th>
-                        <th style={{ padding: '8px 6px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>PU HT (€)</th>
-                        <th style={{ padding: '8px 6px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', width: 70 }}>Rem %</th>
-                        <th style={{ padding: '8px 6px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>Total HT</th>
-                        <th style={{ width: 32 }} />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {form.lignes.map((l, i) => (
-                        <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px 10px' }}>
-                            <input className="form-control" style={{ padding: '4px 8px' }} value={l.description} onChange={e => setLigne(i, 'description', e.target.value)} placeholder="Prestation…" />
-                          </td>
-                          <td style={{ padding: '6px 6px' }}>
-                            <input type="number" className="form-control" style={{ padding: '4px 6px' }} value={l.quantite} onChange={e => setLigne(i, 'quantite', e.target.value)} min="0" step="0.5" />
-                          </td>
-                          <td style={{ padding: '6px 6px' }}>
-                            <input type="number" className="form-control" style={{ padding: '4px 6px' }} value={l.prixUnitaireHT} onChange={e => setLigne(i, 'prixUnitaireHT', e.target.value)} min="0" step="0.01" />
-                          </td>
-                          <td style={{ padding: '6px 6px' }}>
-                            <input type="number" className="form-control" style={{ padding: '4px 6px' }} value={l.remisePct} onChange={e => setLigne(i, 'remisePct', e.target.value)} min="0" max="100" />
-                          </td>
-                          <td style={{ padding: '6px 6px', fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>{fmt(l.totalHT)}</td>
-                          <td style={{ padding: '6px 6px' }}>
-                            {form.lignes.length > 1 && <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16 }} onClick={() => removeLigne(i)}>×</button>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Totaux */}
-              <div style={{ background: 'var(--bg)', borderRadius: 'var(--radius)', padding: 16, marginBottom: 16 }}>
-                <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label className="form-label">Taux TVA (%)</label>
-                  <input type="number" className="form-control" style={{ maxWidth: 120 }} value={form.tauxTVA} onChange={e => setForm(f => ({ ...f, tauxTVA: e.target.value }))} min="0" max="100" step="0.1" />
-                </div>
-                <div style={{ display: 'flex', gap: 24, justifyContent: 'flex-end', fontSize: 13 }}>
-                  <div>Total HT : <strong>{fmt(totaux.totalHT)}</strong></div>
-                  <div>TVA ({form.tauxTVA}%) : <strong>{fmt(totaux.totalTVA)}</strong></div>
-                  <div style={{ fontSize: 15 }}>Total TTC : <strong style={{ color: 'var(--primary)' }}>{fmt(totaux.totalTTC)}</strong></div>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Notes internes</label>
-                <textarea className="form-control" rows={3} value={form.notesInternes} onChange={e => setForm(f => ({ ...f, notesInternes: e.target.value }))} />
-              </div>
-
-              <div className="form-actions">
-                <button className="btn btn-ghost" onClick={() => setModal(null)}>Annuler</button>
-                <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       )}
-    </>
+
+      {/* KPIs */}
+      <div className="kpi-bar" style={{ marginBottom: 16 }}>
+        {[
+          { label: 'Total', value: stats.total, icon: '📄' },
+          { label: 'Brouillons', value: stats.brouillon, icon: '📝', color: '#6c757d' },
+          { label: 'À émettre', value: stats.aEmettre, icon: '🚀', color: '#0d6efd' },
+          { label: 'Émises', value: stats.emises, icon: '✅', color: '#198754' },
+          { label: 'En retard', value: stats.retard, icon: '⚠️', color: '#dc3545' },
+          { label: 'CA HT (filtré)', value: fmt(stats.caHT), icon: '💶', isText: true },
+        ].map((k, i) => (
+          <div key={i} className="kpi-card">
+            <div className="kpi-icon">{k.icon}</div>
+            <div className="kpi-value" style={k.color ? { color: k.color } : {}}>{k.value}</div>
+            <div className="kpi-label">{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filtres */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input className="form-control" style={{ width: 240 }} placeholder="Rechercher client, numéro…"
+          value={search} onChange={e => setSearch(e.target.value)} />
+        <select className="form-control" style={{ width: 160 }}
+          value={filterStatut} onChange={e => setFilterStatut(e.target.value)}>
+          <option value="">Tous statuts</option>
+          {Object.entries(STATUTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <input type="month" className="form-control" style={{ width: 160 }}
+          value={filterMois} onChange={e => setFilterMois(e.target.value)} />
+        {(filterStatut || filterMois || search) && (
+          <button className="btn btn-ghost btn-sm"
+            onClick={() => { setFilterStatut(''); setFilterMois(''); setSearch(''); }}>
+            ✕ Réinitialiser
+          </button>
+        )}
+      </div>
+
+      {/* Tableau */}
+      {loading ? (
+        <div className="spinner"><div className="spinner-ring" /></div>
+      ) : (
+        <div className="card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Numéro</th>
+                <th>Client</th>
+                <th>Mois</th>
+                <th>LDM</th>
+                <th>Collaborateur</th>
+                <th>Émission prévue</th>
+                <th style={{ textAlign: 'right' }}>HT</th>
+                <th style={{ textAlign: 'right' }}>TTC</th>
+                <th>Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: 32 }}>Aucune facture</td></tr>
+              )}
+              {filtered.map(f => (
+                <tr key={f.id} onClick={() => setSelectedId(f.id)} style={{ cursor: 'pointer' }}
+                  className={selectedId === f.id ? 'selected' : ''}>
+                  <td>
+                    <div style={{ fontWeight: 600, fontFamily: 'monospace', fontSize: 12 }}>
+                      {f.numero_fiscal || f.numero}
+                    </div>
+                    {f.numero_fiscal && (
+                      <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{f.numero}</div>
+                    )}
+                  </td>
+                  <td><strong>{f.client_nom || '—'}</strong></td>
+                  <td style={{ fontSize: 13 }}>{fmtMois(f.mois_facturation)}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{f.ldm_numero || '—'}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {f.collab_prenom ? `${f.collab_prenom} ${f.collab_nom}` : '—'}
+                  </td>
+                  <td style={{ fontSize: 12 }}>{fmtDate(f.date_emission_prevue)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmt(f.totalHT)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmt(f.totalTTC)}</td>
+                  <td><StatutBadge s={f.statut} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Drawer */}
+      {selectedId && (
+        <FactureDrawer
+          factureId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onRefresh={load}
+          canEdit={canEdit}
+        />
+      )}
+    </div>
   );
 }

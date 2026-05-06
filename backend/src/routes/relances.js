@@ -63,4 +63,61 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
 
+// ── Config relances automatiques ──────────────────────────────────────────────
+
+// GET /config-auto
+router.get('/config-auto', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT c.*, f.numero AS facture_numero, f.totalTTC AS facture_ttc, cl.nom AS client_nom
+       FROM config_relances_auto c
+       LEFT JOIN factures f ON c.factureId = f.id
+       LEFT JOIN clients cl ON f.client_id = cl.id
+       ORDER BY c.createdAt DESC`
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+// POST /config-auto — créer ou mettre à jour (ON DUPLICATE KEY sur factureId)
+router.post('/config-auto', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const { factureId, joursRelance1 = 30, joursRelance2 = 60, joursRelanceFormelle = 90, actif = 1 } = req.body;
+  if (!factureId) return res.status(400).json({ message: 'factureId requis' });
+  try {
+    const [r] = await pool.query(
+      `INSERT INTO config_relances_auto (factureId, joursRelance1, joursRelance2, joursRelanceFormelle, actif)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         joursRelance1=VALUES(joursRelance1), joursRelance2=VALUES(joursRelance2),
+         joursRelanceFormelle=VALUES(joursRelanceFormelle), actif=VALUES(actif)`,
+      [factureId, joursRelance1, joursRelance2, joursRelanceFormelle, actif ? 1 : 0]
+    );
+    res.status(201).json({ id: r.insertId || r.affectedRows });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
+});
+
+// PUT /config-auto/:id
+router.put('/config-auto/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const { joursRelance1, joursRelance2, joursRelanceFormelle, actif } = req.body;
+  try {
+    const fields = [], values = [];
+    if (joursRelance1 !== undefined) { fields.push('joursRelance1 = ?'); values.push(joursRelance1); }
+    if (joursRelance2 !== undefined) { fields.push('joursRelance2 = ?'); values.push(joursRelance2); }
+    if (joursRelanceFormelle !== undefined) { fields.push('joursRelanceFormelle = ?'); values.push(joursRelanceFormelle); }
+    if (actif !== undefined) { fields.push('actif = ?'); values.push(actif ? 1 : 0); }
+    if (!fields.length) return res.status(400).json({ message: 'Aucun champ' });
+    values.push(req.params.id);
+    await pool.query(`UPDATE config_relances_auto SET ${fields.join(', ')} WHERE id = ?`, values);
+    res.json({ message: 'Config mise à jour' });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
+// DELETE /config-auto/:id
+router.delete('/config-auto/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM config_relances_auto WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Configuration supprimée' });
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur' }); }
+});
+
 module.exports = router;

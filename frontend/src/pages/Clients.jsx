@@ -13,6 +13,15 @@ function parseEquipe(str) {
   });
 }
 
+// Returns { responsable: bool, assistant: bool } — true means MISSING
+function missingRoles(equipe_str) {
+  const eq = parseEquipe(equipe_str);
+  return {
+    responsable: !eq.some(m => m.role === 'responsable'),
+    assistant:   !eq.some(m => m.role === 'assistant'),
+  };
+}
+
 function EquipeAvatars({ equipe }) {
   const MAX_SHOWN = 4;
   const shown = equipe.slice(0, MAX_SHOWN);
@@ -50,6 +59,35 @@ function EquipeAvatars({ equipe }) {
           +{rest}
         </div>
       )}
+    </div>
+  );
+}
+
+function fmtH(minutes) {
+  if (!minutes) return '0h';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h${String(m).padStart(2, '0')}` : `${h}h`;
+}
+
+function fmtEur(v) {
+  if (v == null || v === '') return '—';
+  return Number(v).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+}
+
+function MiniBar({ consomme, budget, danger = false }) {
+  if (!budget) return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>;
+  const pct = Math.min(100, Math.round((consomme / budget) * 100));
+  const color = pct >= 100 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#22c55e';
+  return (
+    <div style={{ minWidth: 80 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2, color: pct >= 100 ? '#ef4444' : 'inherit' }}>
+        <span>{danger ? fmtEur(consomme) : fmtH(consomme)}</span>
+        <span style={{ color: 'var(--text-muted)' }}>{danger ? fmtEur(budget) : fmtH(budget)}</span>
+      </div>
+      <div style={{ height: 4, background: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 2, transition: 'width .3s' }} />
+      </div>
     </div>
   );
 }
@@ -274,6 +312,94 @@ function AttributionsPanel({ client, users, onClose }) {
   );
 }
 
+const ALERTE_META = {
+  non_facture:      { label: 'Non facturé',       color: '#ef4444', bg: '#fee2e2', icon: '🚫' },
+  sous_facturation: { label: 'Sous-facturation',  color: '#f59e0b', bg: '#fffbeb', icon: '⬇️' },
+  depassement:      { label: 'Dépassement budget',color: '#7c3aed', bg: '#ede9fe', icon: '📈' },
+  depassement_temps:{ label: 'Dépassement temps', color: '#7c3aed', bg: '#ede9fe', icon: '⏱' },
+};
+
+function AlertesFacturation({ navigate }) {
+  const [alertes, setAlertes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    api.get('/alertes-facturation')
+      .then(r => setAlertes(r.data || []))
+      .catch(() => setAlertes([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return null;
+  if (alertes.length === 0) return (
+    <div className="card" style={{ marginBottom: 20, borderLeft: '3px solid #22c55e', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 18 }}>✅</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: '#15803d' }}>Aucune alerte facturation — tout est à jour</span>
+    </div>
+  );
+
+  const byType = alertes.reduce((acc, a) => { (acc[a.type] = acc[a.type] || []).push(a); return acc; }, {});
+
+  return (
+    <div className="card" style={{ marginBottom: 20, borderLeft: '3px solid #ef4444' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', cursor: 'pointer', borderBottom: open ? '1px solid var(--border)' : 'none' }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 16 }}>💰</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: '#dc2626' }}>Alertes facturation</span>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#fee2e2', color: '#dc2626' }}>{alertes.length}</span>
+          {Object.entries(byType).map(([type, items]) => {
+            const m = ALERTE_META[type] || {};
+            return (
+              <span key={type} style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: m.bg, color: m.color }}>
+                {m.icon} {items.length} {m.label}
+              </span>
+            );
+          })}
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div className="table-wrapper" style={{ margin: 0 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Type d'alerte</th>
+                <th>Écart constaté</th>
+                <th>Périodicité LDM</th>
+                <th>Collaborateur</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alertes.map((a, i) => {
+                const m = ALERTE_META[a.type] || { label: a.type, color: '#64748b', bg: '#f1f5f9', icon: '⚠️' };
+                return (
+                  <tr key={i} style={{ cursor: 'pointer' }} onClick={() => navigate(`/clients/${a.client_id}`)}>
+                    <td><strong style={{ color: 'var(--primary)' }}>{a.client_nom}</strong></td>
+                    <td>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 10, background: m.bg, color: m.color, whiteSpace: 'nowrap' }}>
+                        {m.icon} {m.label}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 13, color: m.color, fontWeight: 600 }}>{a.ecart}</td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{a.modalite}</td>
+                    <td style={{ fontSize: 13 }}>{a.collaborateur}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Clients() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -348,6 +474,7 @@ export default function Clients() {
         )}
       </div>
       <div className="page-body">
+        {isExpertOrChef && <AlertesFacturation navigate={navigate} />}
         <div className="card">
           <div className="card-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
             <div className="filters-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -411,6 +538,8 @@ export default function Clients() {
                     <th>SIREN</th>
                     <th>Régime</th>
                     {isExpertOrChef && <th>Équipe</th>}
+                    <th style={{ minWidth: 90 }}>Budget temps</th>
+                    <th style={{ minWidth: 90 }}>Honoraires</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -422,7 +551,20 @@ export default function Clients() {
                       onClick={() => navigate(`/clients/${c.id}`)}
                     >
                       <td>
-                        <strong style={{ color: 'var(--primary)' }}>{c.nom}</strong>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <strong style={{ color: 'var(--primary)' }}>{c.nom}</strong>
+                          {isExpertOrChef && (() => {
+                            const { responsable, assistant } = missingRoles(c.equipe);
+                            if (!responsable && !assistant) return null;
+                            const msg = [responsable && 'sans responsable', assistant && 'sans collaborateur'].filter(Boolean).join(' & ');
+                            return (
+                              <span
+                                title={`Équipe incomplète — ${msg}`}
+                                style={{ fontSize: 13, lineHeight: 1, cursor: 'help', flexShrink: 0 }}
+                              >⚠️</span>
+                            );
+                          })()}
+                        </span>
                       </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>
                         {c.raison_sociale || '—'}
@@ -456,6 +598,19 @@ export default function Clients() {
                           })()}
                         </td>
                       )}
+                      <td onClick={e => e.stopPropagation()}>
+                        <MiniBar
+                          consomme={parseInt(c.temps_consomme_minutes) || 0}
+                          budget={parseInt(c.ldm_budget_minutes_total) || 0}
+                        />
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <MiniBar
+                          consomme={parseFloat(c.honoraires_factures_ytd) || 0}
+                          budget={parseFloat(c.ldm_budget_honoraires) || 0}
+                          danger
+                        />
+                      </td>
                       <td onClick={e => e.stopPropagation()}>
                         <div className="td-actions">
                           {isExpertOrChef && (

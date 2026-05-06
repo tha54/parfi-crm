@@ -67,7 +67,8 @@ const CATEGORIES = ['Fiscal', 'Social', 'Juridique', 'Comptabilité', 'Admin', '
 // ─── Task form ────────────────────────────────────────────────────────────────
 
 function TacheForm({ initial, clients, users, currentUser, onSave, onCancel }) {
-  const isManager = ['expert', 'chef_mission'].includes(currentUser?.role);
+  const isManager = ['expert', 'chef_mission'].includes(currentUser?.role) ||
+    ['chef_de_groupe', 'chef_de_mission'].includes(currentUser?.role_metier);
   const isEdit    = !!initial?.id;
 
   const [form, setForm] = useState(() => ({
@@ -263,7 +264,20 @@ function TacheForm({ initial, clients, users, currentUser, onSave, onCancel }) {
   );
 }
 
-// ─── Priority badge ───────────────────────────────────────────────────────────
+// ─── Badges ───────────────────────────────────────────────────────────────────
+
+function AppelBadge() {
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+      background: '#fffbeb', color: '#b45309',
+      border: '1px solid #fde68a',
+      marginRight: 6, whiteSpace: 'nowrap',
+    }}>
+      📞 Appel
+    </span>
+  );
+}
 
 function PrioriteBadge({ priorite }) {
   if (!priorite || priorite === 'normale') return null;
@@ -323,6 +337,7 @@ function TacheListView({ taches, isExpertOrChef, taskDeps, commentCounts, onStat
                 <td>
                   {hasBlock && <span title={`Bloquée par : ${blockNames}`} style={{ marginRight: 5, cursor: 'help' }}>🔒</span>}
                   <PrioriteBadge priorite={t.priorite} />
+                  {t.source === 'appel' && <AppelBadge />}
                   <span style={{ fontWeight: 500 }}>{label}</span>
                   {t.titre && t.description && (
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{t.description}</div>
@@ -402,6 +417,7 @@ function KanbanCard({ t, isExpertOrChef, onStatutChange, onOpenDrawer, onEdit, o
     >
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
         <PrioriteBadge priorite={t.priorite} />
+        {t.source === 'appel' && <AppelBadge />}
         {overdue && (
           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 12, background: '#ffebeb', color: '#d63031' }}>
             ⚠ Retard
@@ -782,7 +798,8 @@ export default function Taches() {
   const [periode, setPeriode]       = useState('aujourd_hui');
   const [view, setView]             = useState('liste');
 
-  const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
+  const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role) ||
+    ['chef_de_groupe', 'chef_de_mission'].includes(user?.role_metier);
 
   const load = () => {
     setLoading(true);
@@ -856,7 +873,7 @@ export default function Taches() {
   return (
     <>
       <div className="page-header">
-        <h1>Mes Tâches</h1>
+        <h1>{isExpertOrChef ? 'Toutes les tâches' : 'Mes tâches'}</h1>
         <button className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>+ Nouvelle tâche</button>
       </div>
 

@@ -8,10 +8,16 @@ const router = express.Router();
 const NATURE_JURIDIQUE = {
   '1000': 'Entrepreneur individuel',
   '1100': 'Artisan-commerçant',
+  '1200': 'Commerçant',
+  '1300': 'Artisan',
   '2110': 'Indivision',
   '5120': 'EURL',
   '5202': 'SNC',
   '5306': 'SCA',
+  '5308': 'EARL',
+  '5410': 'SA',
+  '5415': 'SA cotée',
+  '5422': 'SCA',
   '5499': 'SARL',
   '5596': 'SAS',
   '5710': 'SAS',
@@ -20,8 +26,18 @@ const NATURE_JURIDIQUE = {
   '5599': 'Société anonyme',
   '5800': 'SA à directoire',
   '6317': 'SCOP',
+  '6530': 'Société civile',
+  '6531': 'SCI',
+  '6532': 'SCI de vente',
+  '6533': 'SCI coopérative',
+  '6534': 'SCI',
+  '6535': 'SCI',
+  '6536': "SCI d'attribution",
   '6540': 'SCI',
   '6552': 'SCPI',
+  '6560': 'Société civile foncière',
+  '6561': 'SCI',
+  '6599': 'Société civile',
   '9110': 'Syndicat de copropriétaires',
   '9120': 'Association déclarée',
   '9210': 'Association non déclarée',
@@ -43,6 +59,40 @@ function httpsGet(url) {
     req.setTimeout(8000, () => { req.destroy(); reject(new Error('Timeout')); });
   });
 }
+
+// GET /api/pappers/search?q=<texte libre>
+router.get('/search', verifyToken, async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json([]);
+
+  try {
+    const url = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(q)}&per_page=8&minimal=false`;
+    const { status, body } = await httpsGet(url);
+    if (status !== 200 || !body.results) return res.json([]);
+
+    const results = body.results.map(e => {
+      const siege = e.siege || {};
+      return {
+        nom:             e.nom_complet || e.nom_raison_sociale || '',
+        siren:           e.siren || '',
+        siret:           siege.siret || '',
+        forme_juridique: NATURE_JURIDIQUE[String(e.nature_juridique)] || String(e.nature_juridique || ''),
+        adresse:         siege.adresse || '',
+        code_postal:     siege.code_postal || '',
+        ville:           siege.libelle_commune || '',
+        code_naf:        e.activite_principale || '',
+        activite:        '',
+        date_creation_ent: e.date_creation || null,
+        capital:         null,
+        etat:            e.etat_administratif || '',
+      };
+    });
+    res.json(results);
+  } catch (err) {
+    console.error('Erreur search entreprises:', err.message);
+    res.status(500).json({ message: 'Erreur lors de la recherche' });
+  }
+});
 
 // GET /api/pappers/siren/:siren
 router.get('/siren/:siren', verifyToken, async (req, res) => {

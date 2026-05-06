@@ -8,6 +8,36 @@ const PRIORITE_LABEL = { basse: 'Basse', normale: 'Normale', haute: 'Haute', cri
 const PRIORITE_COLOR = { basse: '#6b7c93', normale: '#0288d1', haute: '#e67e22', critique: '#d63031' };
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
+
+function TranscriptionSection({ transcript }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8,
+          padding: '8px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+          color: '#b45309', textAlign: 'left',
+        }}
+      >
+        <span style={{ transition: 'transform .15s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' }}>▶</span>
+        📞 Transcription de l'appel
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 4, background: '#fafaf7', border: '1px solid #fde68a',
+          borderRadius: '0 0 8px 8px', padding: '10px 12px',
+          fontSize: 12, color: '#374151', lineHeight: 1.6,
+          whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto',
+        }}>
+          {transcript}
+        </div>
+      )}
+    </div>
+  );
+}
 const fmtDateTime = (d) =>
   d
     ? new Date(d).toLocaleDateString('fr-FR', {
@@ -286,6 +316,11 @@ export default function TaskCommentDrawer({ tache, onClose, utilisateurs = [] })
                 ))}
               </div>
             </div>
+          )}
+
+          {/* Transcription appel */}
+          {tache.source === 'appel' && tache.appel_transcript && (
+            <TranscriptionSection transcript={tache.appel_transcript} />
           )}
 
           {/* Divider */}

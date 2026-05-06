@@ -296,7 +296,8 @@ export default function TiimeImport() {
                   <thead>
                     <tr>
                       <th>Code / Nom</th>
-                      <th>Raison sociale</th>
+                      <th>Dirigeant</th>
+                      <th>PA</th>
                       <th>SIREN</th>
                       <th>Forme jur.</th>
                       <th>Ville</th>
@@ -321,7 +322,18 @@ export default function TiimeImport() {
                             </div>
                           )}
                         </td>
-                        <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{row.raison_sociale || '—'}</td>
+                        <td style={{ fontSize: 12 }}>
+                          {(row.prenom_dirigeant || row.nom_dirigeant)
+                            ? `${row.prenom_dirigeant || ''} ${row.nom_dirigeant || ''}`.trim()
+                            : <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          }
+                        </td>
+                        <td>
+                          {row.pa_inscrit
+                            ? <span style={{ fontSize: 11, background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>Oui</span>
+                            : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
+                          }
+                        </td>
                         <td><code style={{ fontSize: 11 }}>{row.siren || '—'}</code></td>
                         <td style={{ fontSize: 12 }}>{row.forme_juridique || '—'}</td>
                         <td style={{ fontSize: 12 }}>{row.ville || '—'}</td>

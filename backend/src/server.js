@@ -42,11 +42,22 @@ const searchRoutes = require('./routes/search');
 const absencesRoutes = require('./routes/absences');
 const rapportsRoutes = require('./routes/rapports');
 const dimensionnementRoutes = require('./routes/dimensionnement');
+const chifrageRoutes = require('./routes/chiffrage');
+const portefeuilleRoutes = require('./routes/portefeuille');
+const chargeTravailRoutes = require('./routes/chargeTravail');
+const activiteRoutes = require('./routes/activite');
+const alertesFacturationRoutes = require('./routes/alertesFacturation');
+const { router: powensRoutes, handleWebhook: powensWebhook } = require('./routes/powens');
+
+const { startScheduler } = require('./scheduler');
 
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173'],
+  origin: [
+    'http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173',
+    'https://163.172.158.24', 'https://parfi-suivi',
+  ],
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -73,7 +84,7 @@ app.use('/api/intervenants', intervenantsRoutes);
 app.use('/api/relances', relancesRoutes);
 app.use('/api/parametres', parametresRoutes);
 app.use('/api/rentabilite', rentabiliteRoutes);
-app.use('/api/charge-travail', rentabiliteRoutes);
+app.use('/api/charge-travail', chargeTravailRoutes);
 app.use('/api/interactions', interactionsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/paiements', paiementsRoutes);
@@ -95,8 +106,17 @@ app.use('/api/search', searchRoutes);
 app.use('/api/absences', absencesRoutes);
 app.use('/api/rapports', rapportsRoutes);
 app.use('/api/dimensionnement', dimensionnementRoutes);
+app.use('/api/chiffrage', chifrageRoutes);
+app.use('/api/portefeuille', portefeuilleRoutes);
+app.use('/api/activite-cabinet', activiteRoutes);
+app.use('/api/alertes-facturation', alertesFacturationRoutes);
+app.use('/api/powens', powensRoutes);
+app.post('/api/webhooks/powens', powensWebhook);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.3' }));
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Parfi CRM API démarré sur le port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Parfi CRM API démarré sur le port ${PORT}`);
+  startScheduler();
+});

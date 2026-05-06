@@ -1,0 +1,127 @@
+// =============================================================================
+// MODULE CABINET - Configuration Parfi France
+// =============================================================================
+// Centralise les données du cabinet utilisées dans les snapshots LDM.
+// Une seule ligne en base pour Parfi France, mais le modèle est dimensionné
+// pour supporter une éventuelle multi-cabinets (Parfi Group multi-sites).
+// =============================================================================
+
+model Cabinet {
+  id                              String      @id @default(cuid())
+  estParDefaut                    Boolean     @default(false) // un seul peut être par défaut
+
+  // --- Identification juridique ---
+  denomination                    String      // "Parfi France"
+  formeJuridique                  String      // "SAS"
+  capitalSocial                   Decimal?    @db.Decimal(15, 2)
+  siren                           String      @unique
+  numeroTVA                       String?
+  rcs                             String      // "RCS Briey"
+  codeAPE                         String?     // "6920Z"
+
+  // --- Coordonnées ---
+  adresse                         String      @db.Text
+  codePostal                      String
+  ville                           String
+  pays                            String      @default("France")
+  telephone                       String
+  email                           String
+
+  // --- Inscription ordinale ---
+  numeroInscriptionOEC            String?     // numéro Ordre des Experts-Comptables
+  conseilRegionalOEC              String      @default("Grand Est")
+
+  // --- Responsabilité civile professionnelle ---
+  rcProfessionnelle               Json        // { compagnie, numeroPolice, montantGarantie, dateRenouvellement }
+
+  // --- Tribunal compétent ---
+  tribunalCompetent               String      // "Tribunal de commerce de Briey"
+
+  // --- Sous-traitants RGPD (déclarés dans les LDM) ---
+  // Format JSON pour rester souple : liste de { denomination, siren, adresse, role, localisationServeurs, paysHebergement }
+  sousTraitantsRGPD               Json
+
+  // --- Outils de production utilisés ---
+  // Liste des outils mentionnés en CG art. 5 (CG-05-OUTILS)
+  outilsProduction                Json        // [{ nom, editeur, usage }]
+
+  // --- Audit ---
+  creeLe                          DateTime    @default(now())
+  modifieLe                       DateTime    @updatedAt
+  modifieParId                    String?
+  modifiePar                      User?       @relation("CabinetModificateur", fields: [modifieParId], references: [id])
+
+  @@index([estParDefaut])
+}
+
+// =============================================================================
+// SEED — Parfi France (à appliquer après migration)
+// =============================================================================
+//
+// const parfiFrance = await prisma.cabinet.create({
+//   data: {
+//     estParDefaut: true,
+//     denomination: "Parfi France",
+//     formeJuridique: "SAS",
+//     capitalSocial: /* à compléter avec Thierry */,
+//     siren: "[SIREN Parfi France à compléter]",
+//     numeroTVA: "[FRxxxxxxxx à compléter]",
+//     rcs: "RCS Briey [numéro à compléter]",
+//     codeAPE: "6920Z",  // Activités comptables
+//
+//     adresse: "[adresse Parfi France Longwy à compléter]",
+//     codePostal: "54400",
+//     ville: "Longwy",
+//     pays: "France",
+//     telephone: "[à compléter]",
+//     email: "[à compléter]",
+//
+//     numeroInscriptionOEC: "[numéro OEC Grand Est à compléter]",
+//     conseilRegionalOEC: "Grand Est",
+//
+//     rcProfessionnelle: {
+//       compagnie: "[à compléter avec Thierry]",
+//       numeroPolice: "[à compléter]",
+//       montantGarantie: "[à compléter, ex: 8 000 000 € par sinistre]",
+//       dateRenouvellement: "[à compléter]"
+//     },
+//
+//     tribunalCompetent: "Tribunal de commerce de Briey",
+//
+//     // Sous-traitants RGPD réels de Parfi (D12)
+//     sousTraitantsRGPD: [
+//       {
+//         rang: "second",
+//         denomination: "TIIME SOFTWARE",
+//         formeJuridique: "SAS",
+//         siren: "823811278",
+//         rcs: "RCS Paris",
+//         adresse: "15 rue Auber, 75009 Paris, France",
+//         role: "Éditeur du logiciel comptable de production utilisé par le Cabinet",
+//         localisationServeurs: "Union européenne",
+//         finalite: "Production comptable, tenue de la comptabilité, établissement des comptes, déclarations"
+//       },
+//       {
+//         rang: "troisieme",  // sous-traitant ultérieur de Tiime
+//         denomination: "Amazon Web Services EMEA SARL",
+//         formeJuridique: "SARL",
+//         numeroEnregistrement: "B186284",
+//         registre: "RCS Luxembourg",
+//         adresse: "38 Avenue John F. Kennedy, 1855 Luxembourg",
+//         role: "Hébergeur de l'infrastructure du logiciel Tiime",
+//         localisationServeurs: "Union européenne",
+//         finalite: "Hébergement et stockage des données traitées via le logiciel Tiime",
+//         viaDeclaration: "Tiime Software"  // Tiime est responsable de cette sous-traitance
+//       }
+//     ],
+//
+//     outilsProduction: [
+//       {
+//         nom: "Tiime",
+//         editeur: "Tiime Software SAS",
+//         usage: "Logiciel de production comptable interne au Cabinet",
+//         souscriptionClientRequise: false
+//       }
+//     ]
+//   }
+// });

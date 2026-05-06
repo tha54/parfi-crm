@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { getVisibleUserIds, inClause } = require('../utils/scope');
 
 // Maps régime to list of TVA échéance months
 function tvaMonths(regime) {
@@ -24,14 +25,12 @@ function generateEcheances(clientId, regime, annee) {
       exercice: String(annee),
     });
   }
-  // Liasse fiscale
   echeances.push({
     client_id: clientId, type: 'liasse_fiscale',
     date_echeance: `${annee}-05-31`,
     label: `Liasse fiscale ${annee}`,
     exercice: String(annee),
   });
-  // Bilan
   echeances.push({
     client_id: clientId, type: 'bilan',
     date_echeance: `${annee}-06-30`,
@@ -45,12 +44,26 @@ function generateEcheances(clientId, regime, annee) {
 router.get('/echeances', verifyToken, async (req, res) => {
   try {
     const { client_id, statut, type, annee } = req.query;
+    const visibleIds = await getVisibleUserIds(pool, req.user);
+
     let where = '1=1';
     const params = [];
-    if (client_id) { where += ' AND e.client_id = ?'; params.push(client_id); }
+
+    if (client_id) {
+      where += ' AND e.client_id = ?'; params.push(client_id);
+    } else if (visibleIds !== null) {
+      // Filter echeances to clients managed by visible users
+      const { clause, params: p } = inClause(visibleIds, 'a.utilisateur_id');
+      where += ` AND EXISTS (
+        SELECT 1 FROM attributions a WHERE a.client_id = e.client_id ${clause}
+      )`;
+      params.push(...p);
+    }
+
     if (statut) { where += ' AND e.statut = ?'; params.push(statut); }
     if (type) { where += ' AND e.type = ?'; params.push(type); }
     if (annee) { where += ' AND YEAR(e.date_echeance) = ?'; params.push(Number(annee)); }
+
     const [rows] = await pool.query(
       `SELECT e.*, c.nom AS client_nom
        FROM echeances_fiscales e
@@ -101,17 +114,29 @@ router.put('/echeances/:id', verifyToken, async (req, res) => {
 router.get('/taches', verifyToken, async (req, res) => {
   try {
     const { utilisateur_id, statut, priorite, date_debut, date_fin, limit = 200 } = req.query;
+    const visibleIds = await getVisibleUserIds(pool, req.user);
+
     let where = '1=1';
     const params = [];
-    if (req.user.role === 'collaborateur') {
-      where += ' AND t.utilisateur_id = ?'; params.push(req.user.id);
+
+    if (visibleIds !== null) {
+      if (utilisateur_id) {
+        const uid = Number(utilisateur_id);
+        if (!visibleIds.includes(uid)) return res.json([]);
+        where += ' AND t.utilisateur_id = ?'; params.push(uid);
+      } else {
+        const { clause, params: p } = inClause(visibleIds, 't.utilisateur_id');
+        where += ' ' + clause; params.push(...p);
+      }
     } else if (utilisateur_id) {
       where += ' AND t.utilisateur_id = ?'; params.push(utilisateur_id);
     }
+
     if (statut) { where += ' AND t.statut = ?'; params.push(statut); }
     if (priorite) { where += ' AND t.priorite = ?'; params.push(priorite); }
     if (date_debut) { where += ' AND t.date_echeance >= ?'; params.push(date_debut); }
     if (date_fin) { where += ' AND t.date_echeance <= ?'; params.push(date_fin); }
+
     const [rows] = await pool.query(
       `SELECT t.*, c.nom AS client_nom, CONCAT(u.prenom,' ',u.nom) AS utilisateur_nom,
               m.nom AS mission_nom
@@ -133,7 +158,10 @@ router.get('/calendrier', verifyToken, async (req, res) => {
   try {
     const { debut, fin } = req.query;
     if (!debut || !fin) return res.status(400).json({ message: 'debut et fin requis' });
-    const userCond = req.user.role === 'collaborateur' ? `AND t.utilisateur_id = ${pool.escape(req.user.id)}` : '';
+
+    const visibleIds = await getVisibleUserIds(pool, req.user);
+    const { clause: userClause, params: userParams } = inClause(visibleIds, 't.utilisateur_id');
+
     const [taches] = await pool.query(
       `SELECT t.id, COALESCE(t.titre, t.description) AS titre, t.statut, t.priorite,
               t.date_echeance AS date, c.nom AS client_nom,
@@ -141,19 +169,30 @@ router.get('/calendrier', verifyToken, async (req, res) => {
        FROM taches t
        LEFT JOIN clients c ON t.client_id = c.id
        LEFT JOIN utilisateurs u ON t.utilisateur_id = u.id
-       WHERE t.date_echeance BETWEEN ? AND ? ${userCond}
+       WHERE t.date_echeance BETWEEN ? AND ? ${userClause}
        ORDER BY t.date_echeance`,
-      [debut, fin]
+      [debut, fin, ...userParams]
     );
+
+    // Echeances: filtered to visible users' clients
+    let echeanceWhere = 'e.date_echeance BETWEEN ? AND ?';
+    const echeanceParams = [debut, fin];
+    if (visibleIds !== null) {
+      const { clause, params: p } = inClause(visibleIds, 'a.utilisateur_id');
+      echeanceWhere += ` AND EXISTS (SELECT 1 FROM attributions a WHERE a.client_id = e.client_id ${clause})`;
+      echeanceParams.push(...p);
+    }
+
     const [echeances] = await pool.query(
       `SELECT e.id, e.label AS titre, e.statut, e.date_echeance AS date,
               c.nom AS client_nom, e.type, 'echeance' AS type_evenement
        FROM echeances_fiscales e
        LEFT JOIN clients c ON e.client_id = c.id
-       WHERE e.date_echeance BETWEEN ? AND ?
+       WHERE ${echeanceWhere}
        ORDER BY e.date_echeance`,
-      [debut, fin]
+      echeanceParams
     );
+
     res.json({ taches, echeances, total: taches.length + echeances.length });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
@@ -161,8 +200,9 @@ router.get('/calendrier', verifyToken, async (req, res) => {
 // GET /stats
 router.get('/stats', verifyToken, async (req, res) => {
   try {
-    const userCond = req.user.role === 'collaborateur'
-      ? `AND utilisateur_id = ${pool.escape(req.user.id)}` : '';
+    const visibleIds = await getVisibleUserIds(pool, req.user);
+    const { clause: userClause, params: userParams } = inClause(visibleIds, 'utilisateur_id');
+
     const [[stats]] = await pool.query(`
       SELECT
         SUM(CASE WHEN statut IN ('a_faire','en_cours') AND date_echeance < CURDATE() THEN 1 ELSE 0 END) AS en_retard,
@@ -170,14 +210,25 @@ router.get('/stats', verifyToken, async (req, res) => {
         SUM(CASE WHEN statut = 'a_faire' AND date_echeance BETWEEN DATE_ADD(CURDATE(),INTERVAL 1 DAY) AND DATE_ADD(CURDATE(),INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS cette_semaine,
         SUM(CASE WHEN statut = 'termine' THEN 1 ELSE 0 END) AS terminees,
         COUNT(*) AS total
-      FROM taches WHERE 1=1 ${userCond}
-    `);
+      FROM taches WHERE 1=1 ${userClause}
+    `, userParams);
+
+    // Echeances stats: scoped to visible users' clients
+    let echWhere = '1=1';
+    const echParams = [];
+    if (visibleIds !== null) {
+      const { clause, params: p } = inClause(visibleIds, 'a.utilisateur_id');
+      echWhere += ` AND EXISTS (SELECT 1 FROM attributions a WHERE a.client_id = echeances_fiscales.client_id ${clause})`;
+      echParams.push(...p);
+    }
+
     const [[ech]] = await pool.query(`
       SELECT
         SUM(CASE WHEN statut='a_faire' AND date_echeance < CURDATE() THEN 1 ELSE 0 END) AS echeances_retard,
         SUM(CASE WHEN statut='a_faire' AND date_echeance BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS echeances_semaine
-      FROM echeances_fiscales
-    `);
+      FROM echeances_fiscales WHERE ${echWhere}
+    `, echParams);
+
     res.json({ ...stats, ...ech });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });

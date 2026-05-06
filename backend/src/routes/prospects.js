@@ -9,9 +9,21 @@ router.get('/', verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT p.*,
-              u.prenom AS cree_par_prenom, u.nom AS cree_par_nom
+              u.prenom AS cree_par_prenom, u.nom AS cree_par_nom,
+              d.id      AS devis_id,
+              d.numero  AS devis_numero,
+              d.statut  AS devis_statut,
+              d.total_ht_net AS devis_montant_ht,
+              d.totalTTC     AS devis_montant_ttc,
+              d.createdAt    AS devis_date
        FROM prospects p
        LEFT JOIN utilisateurs u ON u.id = p.cree_par
+       LEFT JOIN (
+         SELECT prospect_id,
+                id, numero, statut, total_ht_net, totalTTC, createdAt,
+                ROW_NUMBER() OVER (PARTITION BY prospect_id ORDER BY createdAt DESC) AS rn
+         FROM devis
+       ) d ON d.prospect_id = p.id AND d.rn = 1
        ORDER BY p.cree_le DESC`
     );
     res.json(rows);
@@ -42,9 +54,6 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
   } = req.body;
 
   if (!nom?.trim()) return res.status(400).json({ message: 'Le nom est requis' });
-  if (!email && !telephone && !contact_email && !contact_telephone) {
-    return res.status(400).json({ message: 'Au moins un email ou téléphone est requis' });
-  }
 
   try {
     const [result] = await pool.query(

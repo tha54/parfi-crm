@@ -14,14 +14,25 @@ router.get('/', verifyToken, async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT o.*,
-              COALESCE(c.raisonSociale, p.nom) AS contactNom,
-              CONCAT(i.prenom, ' ', i.nom)     AS intervenantNom
+              COALESCE(cl.nom, c.raisonSociale, p.nom) AS contactNom,
+              CONCAT(i.prenom, ' ', i.nom)              AS intervenantNom,
+              dv.id      AS devis_id,
+              dv.numero  AS devis_numero,  dv.statut  AS devis_statut,
+              ldm.numero AS ldm_numero,   ldm.statut  AS ldm_statut
        FROM opportunites o
-       LEFT JOIN contacts    c  ON o.contactId    = c.id
-       LEFT JOIN prospects   p  ON o.prospect_id  = p.id
-       LEFT JOIN intervenants i ON o.intervenantId = i.id
+       LEFT JOIN contacts       c   ON o.contactId    = c.id
+       LEFT JOIN prospects      p   ON o.prospect_id  = p.id
+       LEFT JOIN clients        cl  ON o.client_id    = cl.id
+       LEFT JOIN intervenants   i   ON o.intervenantId = i.id
+       LEFT JOIN devis          dv  ON dv.id = COALESCE(
+         o.devis_id,
+         (SELECT id FROM devis WHERE opportunite_id = o.id ORDER BY id DESC LIMIT 1),
+         (SELECT id FROM devis WHERE prospect_id = o.prospect_id AND o.prospect_id IS NOT NULL ORDER BY id DESC LIMIT 1),
+         (SELECT id FROM devis WHERE client_id = o.client_id AND o.client_id IS NOT NULL ORDER BY id DESC LIMIT 1)
+       )
+       LEFT JOIN lettres_mission ldm ON ldm.id = o.ldm_id
        WHERE ${where}
-       ORDER BY o.createdAt DESC`,
+       ORDER BY o.updatedAt DESC`,
       params
     );
 
@@ -60,16 +71,16 @@ router.get('/:id', verifyToken, async (req, res) => {
 
 // POST / — créer une opportunité
 router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
-  const { contactId, prospect_id, titre, description, statut, montantEstime, probabilite, dateEcheance, intervenantId } = req.body;
-  if (!contactId && !prospect_id) return res.status(400).json({ message: 'Contact ou prospect requis' });
+  const { contactId, prospect_id, client_id, titre, description, statut, montantEstime, probabilite, dateEcheance, intervenantId } = req.body;
+  if (!contactId && !prospect_id && !client_id) return res.status(400).json({ message: 'Contact, prospect ou client requis' });
   if (!titre) return res.status(400).json({ message: 'Titre requis' });
   try {
     const [r] = await pool.query(
       `INSERT INTO opportunites
-         (contactId, prospect_id, titre, description, statut, montantEstime, probabilite, dateEcheance, intervenantId)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+         (contactId, prospect_id, client_id, titre, description, statut, montantEstime, probabilite, dateEcheance, intervenantId)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
       [
-        contactId || null, prospect_id || null,
+        contactId || null, prospect_id || null, client_id || null,
         titre, description || null,
         statut || 'prospect',
         montantEstime || null, probabilite || 0,
@@ -82,7 +93,7 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
 
 // PUT /:id — mettre à jour
 router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
-  const allowed = ['titre','description','statut','montantEstime','probabilite','dateEcheance','intervenantId','raisonPerte','contactId','prospect_id'];
+  const allowed = ['titre','description','statut','montantEstime','probabilite','dateEcheance','intervenantId','raisonPerte','contactId','prospect_id','client_id'];
   const fields = [], values = [];
   for (const k of allowed) {
     if (req.body[k] !== undefined) { fields.push(`${k} = ?`); values.push(req.body[k]); }

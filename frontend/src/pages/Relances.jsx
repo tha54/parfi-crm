@@ -68,22 +68,30 @@ function RelanceModal({ facture, onSave, onClose }) {
   );
 }
 
+const DEFAULT_CONFIG = { factureId: '', joursRelance1: 30, joursRelance2: 60, joursRelanceFormelle: 90, actif: true };
+
 export default function Relances() {
   const [factures, setFactures] = useState([]);
   const [historique, setHistorique] = useState([]);
+  const [configAuto, setConfigAuto] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [tab, setTab] = useState('retard');
+  const [configForm, setConfigForm] = useState(DEFAULT_CONFIG);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configMsg, setConfigMsg] = useState(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [fRes, hRes] = await Promise.all([
+      const [fRes, hRes, cRes] = await Promise.all([
         api.get('/relances/en-retard'),
         api.get('/relances'),
+        api.get('/relances/config-auto').catch(() => ({ data: [] })),
       ]);
       setFactures(fRes.data);
       setHistorique(hRes.data);
+      setConfigAuto(cRes.data);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -124,6 +132,9 @@ export default function Relances() {
         </button>
         <button className={`btn btn-sm ${tab === 'historique' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('historique')}>
           Historique ({historique.length})
+        </button>
+        <button className={`btn btn-sm ${tab === 'config' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('config')}>
+          ⚙️ Config auto ({configAuto.length})
         </button>
       </div>
 
@@ -207,6 +218,110 @@ export default function Relances() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'config' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Formulaire d'ajout */}
+          <div className="card">
+            <div className="card-header"><span className="card-title">Configurer la relance automatique pour une facture</span></div>
+            <div className="card-body">
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+                Définissez les délais de relance automatique par facture. Le scheduler vérifie quotidiennement et envoie les relances aux échéances configurées.
+              </p>
+              {configMsg && (
+                <div className={`alert ${configMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ marginBottom: 12 }}>
+                  {configMsg.text}
+                  <button onClick={() => setConfigMsg(null)} style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Facture *</label>
+                  <select className="form-control" value={configForm.factureId}
+                    onChange={e => setConfigForm(f => ({ ...f, factureId: e.target.value }))}>
+                    <option value="">— Choisir une facture en retard —</option>
+                    {factures.map(f => (
+                      <option key={f.id} value={f.id}>{f.numero} — {f.clientNom || '—'} ({fmt(f.resteARegler)})</option>
+                    ))}
+                  </select>
+                </div>
+                {[
+                  { key: 'joursRelance1', label: 'J+1 (jours)' },
+                  { key: 'joursRelance2', label: 'J+2 (jours)' },
+                  { key: 'joursRelanceFormelle', label: 'Formelle (jours)' },
+                ].map(({ key, label }) => (
+                  <div key={key} className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">{label}</label>
+                    <input type="number" className="form-control" min="1" value={configForm[key]}
+                      onChange={e => setConfigForm(f => ({ ...f, [key]: Number(e.target.value) }))} />
+                  </div>
+                ))}
+                <button className="btn btn-primary" disabled={configSaving || !configForm.factureId}
+                  onClick={async () => {
+                    setConfigSaving(true); setConfigMsg(null);
+                    try {
+                      await api.post('/relances/config-auto', configForm);
+                      setConfigMsg({ ok: true, text: 'Configuration enregistrée' });
+                      setConfigForm(DEFAULT_CONFIG);
+                      await load();
+                    } catch (e) {
+                      setConfigMsg({ ok: false, text: e.response?.data?.message || 'Erreur' });
+                    } finally { setConfigSaving(false); }
+                  }}>
+                  {configSaving ? '…' : '+ Ajouter'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Liste des configs */}
+          <div className="card">
+            <div className="card-header"><span className="card-title">Configurations existantes</span></div>
+            <div className="table-wrapper">
+              <table>
+                <thead><tr>
+                  <th>Facture</th><th>Client</th>
+                  <th style={{ textAlign: 'right' }}>J+1</th>
+                  <th style={{ textAlign: 'right' }}>J+2</th>
+                  <th style={{ textAlign: 'right' }}>Formelle</th>
+                  <th style={{ textAlign: 'center' }}>Actif</th>
+                  <th />
+                </tr></thead>
+                <tbody>
+                  {configAuto.length === 0 && (
+                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Aucune configuration</td></tr>
+                  )}
+                  {configAuto.map(c => (
+                    <tr key={c.id}>
+                      <td style={{ fontWeight: 500 }}>{c.facture_numero || `#${c.factureId}`}</td>
+                      <td>{c.client_nom || '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{c.joursRelance1} j</td>
+                      <td style={{ textAlign: 'right' }}>{c.joursRelance2} j</td>
+                      <td style={{ textAlign: 'right' }}>{c.joursRelanceFormelle} j</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button className={`btn btn-sm ${c.actif ? 'btn-primary' : 'btn-ghost'}`} style={{ fontSize: 11, padding: '2px 10px', background: c.actif ? '#00897b' : '' }}
+                          onClick={async () => {
+                            await api.put(`/relances/config-auto/${c.id}`, { actif: !c.actif });
+                            await load();
+                          }}>
+                          {c.actif ? '✓ Actif' : 'Inactif'}
+                        </button>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button className="btn btn-danger btn-sm" style={{ fontSize: 11 }}
+                          onClick={async () => {
+                            await api.delete(`/relances/config-auto/${c.id}`);
+                            await load();
+                          }}>🗑</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

@@ -49,6 +49,89 @@ router.post('/', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', e: e.message }); }
 });
 
+// POST /sepa-export — génère un fichier SEPA XML PAIN.008 pour les factures du mois
+router.post('/sepa-export', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const moisAnnee = req.body.moisAnnee || new Date().toISOString().slice(0, 7);
+  const [year, month] = moisAnnee.split('-').map(Number);
+  const dateDebut = `${moisAnnee}-01`;
+  const dateFin   = new Date(year, month, 0).toISOString().slice(0, 10);
+
+  try {
+    const [[cab]] = await pool.query('SELECT * FROM parametres_cabinet LIMIT 1').catch(() => [[{}]]);
+    const iban = cab?.iban || 'FRXX XXXX XXXX XXXX XXXX XXXX XXX';
+    const bic  = cab?.bic  || 'BNPAFRPPXXX';
+    const creditorNom = cab?.nomCabinet || 'ParFi France';
+
+    const [factures] = await pool.query(
+      `SELECT f.id, f.numero, f.totalTTC, f.dateEcheance, cl.nom AS client_nom
+       FROM factures f
+       LEFT JOIN clients cl ON f.client_id = cl.id
+       WHERE f.statut IN ('envoyee','retard')
+         AND f.dateEcheance BETWEEN ? AND ?
+         AND f.totalTTC > 0`,
+      [dateDebut, dateFin]
+    );
+
+    const now = new Date();
+    const msgId = `PARFI-${now.getTime()}`;
+    const collectDate = dateFin;
+    const total = factures.reduce((s, f) => s + parseFloat(f.totalTTC || 0), 0);
+
+    const txEntries = factures.map((f, i) => `
+      <DrctDbtTxInf>
+        <PmtId><EndToEndId>PARFI-${f.id}-${moisAnnee}</EndToEndId></PmtId>
+        <InstdAmt Ccy="EUR">${parseFloat(f.totalTTC).toFixed(2)}</InstdAmt>
+        <DrctDbtTx>
+          <MndtRltdInf>
+            <MndtId>MANDAT-${f.id}</MndtId>
+            <DtOfSgntr>${collectDate}</DtOfSgntr>
+          </MndtRltdInf>
+        </DrctDbtTx>
+        <DbtrAgt><FinInstnId><BIC>XXXXXXXX</BIC></FinInstnId></DbtrAgt>
+        <Dbtr><Nm>${(f.client_nom || 'Client').replace(/[<>&]/g, '')}</Nm></Dbtr>
+        <DbtrAcct><Id><IBAN>FRXX XXXX XXXX XXXX XXXX XXXX XXX</IBAN></Id></DbtrAcct>
+        <RmtInf><Ustrd>Honoraires ${f.numero} ${moisAnnee}</Ustrd></RmtInf>
+      </DrctDbtTxInf>`).join('');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.003.02">
+  <CstmrDrctDbtInitn>
+    <GrpHdr>
+      <MsgId>${msgId}</MsgId>
+      <CreDtTm>${now.toISOString()}</CreDtTm>
+      <NbOfTxs>${factures.length}</NbOfTxs>
+      <CtrlSum>${total.toFixed(2)}</CtrlSum>
+      <InitgPty><Nm>${creditorNom.replace(/[<>&]/g, '')}</Nm></InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>PMT-${msgId}</PmtInfId>
+      <PmtMtd>DD</PmtMtd>
+      <NbOfTxs>${factures.length}</NbOfTxs>
+      <CtrlSum>${total.toFixed(2)}</CtrlSum>
+      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm><SeqTp>RCUR</SeqTp></PmtTpInf>
+      <ReqdColltnDt>${collectDate}</ReqdColltnDt>
+      <Cdtr><Nm>${creditorNom.replace(/[<>&]/g, '')}</Nm></Cdtr>
+      <CdtrAcct><Id><IBAN>${iban.replace(/\s/g, '')}</IBAN></Id></CdtrAcct>
+      <CdtrAgt><FinInstnId><BIC>${bic}</BIC></FinInstnId></CdtrAgt>${txEntries}
+    </PmtInf>
+  </CstmrDrctDbtInitn>
+</Document>`;
+
+    // Enregistrement dans prelevements_sepa
+    await pool.query(
+      `INSERT INTO prelevements_sepa (moisAnnee, statut, dateExport, nbEcheances, montantTotal)
+       VALUES (?, 'exporte', NOW(), ?, ?)`,
+      [moisAnnee, factures.length, total]
+    ).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="sepa-${moisAnnee}.xml"`);
+    res.send(xml);
+  } catch (e) {
+    res.status(500).json({ message: 'Erreur génération SEPA', e: e.message });
+  }
+});
+
 // DELETE /:id
 router.delete('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   try {

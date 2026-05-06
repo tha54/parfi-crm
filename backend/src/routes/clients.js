@@ -400,6 +400,32 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
   }
 });
 
+// Navigation prev/next (ordre alphabétique nom, actif uniquement)
+router.get('/:id/adjacent', verifyToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const [[cur]] = await pool.query('SELECT nom FROM clients WHERE id = ?', [id]);
+    if (!cur) return res.status(404).json({ message: 'Client introuvable' });
+
+    const [[prev]] = await pool.query(
+      `SELECT id, nom FROM clients
+       WHERE actif = 1 AND (nom < ? OR (nom = ? AND id < ?))
+       ORDER BY nom DESC, id DESC LIMIT 1`,
+      [cur.nom, cur.nom, id]
+    );
+    const [[next]] = await pool.query(
+      `SELECT id, nom FROM clients
+       WHERE actif = 1 AND (nom > ? OR (nom = ? AND id > ?))
+       ORDER BY nom ASC, id ASC LIMIT 1`,
+      [cur.nom, cur.nom, id]
+    );
+
+    res.json({ prev: prev || null, next: next || null });
+  } catch (e) {
+    res.status(500).json({ message: 'Erreur serveur', error: e.message });
+  }
+});
+
 // Check wizard readiness pour un client (4 champs critiques)
 router.get('/:id/wizard-readiness', verifyToken, async (req, res) => {
   try {

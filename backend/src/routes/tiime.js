@@ -10,6 +10,22 @@ const { parse } = require('csv-parse/sync');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 const SERVER_CSV_PATH = '/opt/parfi-crm/export_dossiers_20260426.csv';
 
+// ─── DB migration helpers ─────────────────────────────────────────────────────
+async function ensureColumn(col, def) {
+  const [[r]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='parfi' AND TABLE_NAME='clients' AND COLUMN_NAME=?`,
+    [col]
+  );
+  if (!r.n) await pool.query(`ALTER TABLE clients ADD COLUMN ${col} ${def}`);
+}
+async function ensureClientColumns() {
+  await ensureColumn('nom_dirigeant', 'VARCHAR(100)');
+  await ensureColumn('prenom_dirigeant', 'VARCHAR(100)');
+  await ensureColumn('date_debut_mission', 'DATE');
+  await ensureColumn('date_fin_mission', 'DATE');
+  await ensureColumn('pa_inscrit', 'TINYINT(1) DEFAULT 0');
+}
+
 // ─── AES-256-GCM for notes_sensibles ─────────────────────────────────────────
 const ENC_KEY = Buffer.from(
   (process.env.NOTES_ENCRYPTION_KEY || 'parfi-notes-enc-key-32bytes-pad!!').padEnd(32, '!').slice(0, 32)
@@ -98,6 +114,19 @@ function mapRegimeTVACode(val) {
   return val?.trim() || null;
 }
 
+function mapMotifFin(raw) {
+  if (!raw) return null;
+  const v = raw.toLowerCase();
+  if (v.includes('cessation')) return 'cessation_volontaire';
+  if (v.includes('confrère') || v.includes('confrere') || v.includes('concurrent')) return 'reprise_confrere';
+  if (v.includes('projet abandonné') || v.includes('projet abandonne')) return 'projet_abandonne';
+  if (v.includes('coût') || v.includes('cout') || v.includes('prix')) return 'insatisfaction_prix';
+  if (v.includes('insatisfaction') || v.includes('qualité') || v.includes('qualite')) return 'insatisfaction_qualite';
+  if (v.includes('litige') || v.includes('impayé') || v.includes('impaye')) return 'non_paiement';
+  if (v.includes('périmètre') || v.includes('perimetre')) return 'autre';
+  return 'autre';
+}
+
 // ─── Fuzzy user name match ────────────────────────────────────────────────────
 function fuzzyMatchUser(name, users) {
   if (!name?.trim()) return null;
@@ -139,6 +168,8 @@ function mapRow(r) {
     nom,
     dossier:            dossier || null,
     raison_sociale:     raisonSoc,
+    nom_dirigeant:      nomDir || null,
+    prenom_dirigeant:   prenomDir || null,
     siren,
     siret:              siret || null,
     forme_juridique:    fj || null,
@@ -153,6 +184,9 @@ function mapRow(r) {
     type:               mapClientType(fj, ri),
     regime:             mapRegime(tva),
     date_cloture:       parseDate(r['Date de clôture du premier exercice ouvert']),
+    date_debut_mission: parseDate(r['Début de mission']),
+    date_fin_mission:   parseDate(r['Fin de mission']),
+    pa_inscrit:         (r['Pré-inscription à PA'] || '').toLowerCase() === 'oui' ? 1 : 0,
     email_dirigeant:    r['Email dirigeant'] || null,
     telephone_dirigeant:r['Téléphone du dirigeant'] || null,
     notes_sensibles:    r['Note dossier'] || null,
@@ -161,11 +195,17 @@ function mapRow(r) {
     chef_mission:       r['Chef de Mission'] || null,
     collaborateur:      r['Collaborateur'] || null,
     autres_intervenants:r['Autres intervenants'] || null,
+    superviseur:        r['Superviseur'] || null,
+    assistant_comptable:r['Assistant comptable'] || null,
+    referent_juridique: r['Référent juridique'] || null,
+    motif_fin_raw:      r['Motif'] || null,
+    motif_detail_raw:   r['Commentaire Fin de mission'] || null,
   };
 }
 
 // ─── Shared: build analysis from rows array ────────────────────────────────────
 async function buildAnalysis(rows) {
+  await ensureClientColumns();
   const [users]    = await pool.query('SELECT id, nom, prenom FROM utilisateurs WHERE actif = 1');
   const [existing] = await pool.query('SELECT siren FROM clients WHERE siren IS NOT NULL');
   const existingSIRENs = new Set(existing.map(c => c.siren));
@@ -185,20 +225,22 @@ async function buildAnalysis(rows) {
   });
 
   const preview = actifRows.slice(0, 5).map(r => ({
-    nom:             r.nom,
-    raison_sociale:  r.raison_sociale,
-    siren:           r.siren,
-    siret:           r.siret,
-    forme_juridique: r.forme_juridique,
-    ville:           r.ville,
-    type:            r.type,
-    regime_tva:      r.regime_tva,
-    regime_fiscal:   r.regime_fiscal,
-    expert:          r.expert,
-    collaborateur:   r.collaborateur,
-    groupe:          r.groupe,
-    hasNote:         !!(r.notes_sensibles?.trim()),
-    isDuplicate:     !!(r.siren && existingSIRENs.has(r.siren)),
+    nom:              r.nom,
+    nom_dirigeant:    r.nom_dirigeant,
+    prenom_dirigeant: r.prenom_dirigeant,
+    pa_inscrit:       r.pa_inscrit,
+    siren:            r.siren,
+    siret:            r.siret,
+    forme_juridique:  r.forme_juridique,
+    ville:            r.ville,
+    type:             r.type,
+    regime_tva:       r.regime_tva,
+    regime_fiscal:    r.regime_fiscal,
+    expert:           r.expert,
+    collaborateur:    r.collaborateur,
+    groupe:           r.groupe,
+    hasNote:          !!(r.notes_sensibles?.trim()),
+    isDuplicate:      !!(r.siren && existingSIRENs.has(r.siren)),
   }));
 
   return {
@@ -215,6 +257,7 @@ async function buildAnalysis(rows) {
 
 // ─── Shared: run the import ────────────────────────────────────────────────────
 async function runImport(rows, options, userId) {
+  await ensureClientColumns();
   const { includeArchived = false } = options;
   const [users]    = await pool.query('SELECT id, nom, prenom FROM utilisateurs WHERE actif = 1');
   const [existing] = await pool.query('SELECT siren FROM clients WHERE siren IS NOT NULL');
@@ -257,8 +300,11 @@ async function runImport(rows, options, userId) {
             forme_juridique, raison_sociale,
             adresse, code_postal, ville, capital, code_ape, activite,
             regime_tva, regime_fiscal, date_cloture, groupe,
-            email_dirigeant, telephone_dirigeant, notes_sensibles)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            email_dirigeant, telephone_dirigeant, notes_sensibles,
+            nom_dirigeant, prenom_dirigeant,
+            date_debut_mission, date_fin_mission, pa_inscrit,
+            motif_fin, motif_detail)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           r.nom, r.siren, r.siret, r.type, r.regime, isArch ? 0 : 1,
           r.forme_juridique, r.raison_sociale,
@@ -268,6 +314,9 @@ async function runImport(rows, options, userId) {
           r.date_cloture, r.groupe,
           r.email_dirigeant, r.telephone_dirigeant,
           encryptNote(r.notes_sensibles),
+          r.nom_dirigeant, r.prenom_dirigeant,
+          r.date_debut_mission, r.date_fin_mission, r.pa_inscrit,
+          mapMotifFin(r.motif_fin_raw), r.motif_detail_raw || null,
         ]
       );
       const clientId = result.insertId;
@@ -289,12 +338,15 @@ async function runImport(rows, options, userId) {
           [clientId, uid, role]
         );
       };
-      await addAttr(r.expert,       'responsable');
-      await addAttr(r.chef_mission, 'responsable');
-      await addAttr(r.collaborateur,'assistant');
+      await addAttr(r.expert,            'responsable');
+      await addAttr(r.chef_mission,      'responsable');
+      await addAttr(r.collaborateur,     'assistant');
       for (const n of (r.autres_intervenants?.split(',').map(s=>s.trim()).filter(Boolean) || [])) {
         await addAttr(n, 'assistant');
       }
+      await addAttr(r.superviseur,          'assistant');
+      await addAttr(r.assistant_comptable,  'assistant');
+      await addAttr(r.referent_juridique,   'assistant');
     } catch (e) {
       errorLog.push({ row: idx + 2, nom: r.nom, siren: r.siren || '—', reason: e.message });
     }

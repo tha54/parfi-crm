@@ -1,0 +1,260 @@
+// =============================================================================
+// MODULE LETTRE DE MISSION - Parfi France
+// =============================================================================
+// Hypothèses sur les modèles existants (à ajuster selon ton schema actuel) :
+// - Client { id, siren, denomination, formeJuridique, adresse, ... }
+// - Devis { id, numero, clientId, statut, dateAcceptation, missions[], ... }
+// - Mission { id, devisId, type, libelle, honoraires, ... }
+// - User { id, email, nom, role } (collaborateurs / associés)
+// =============================================================================
+
+enum LdmStatut {
+  BROUILLON              // Créée automatiquement, pré-remplie
+  A_VALIDER              // Soumise à relecture interne (associé)
+  VALIDEE_INTERNE        // Validée en interne, prête à envoyer
+  ENVOYEE                // Envoyée au client, en attente de signature
+  SIGNEE                 // Signée par le client
+  ACTIVE                 // En vigueur (peut chevaucher avec SIGNEE)
+  RESILIEE               // Résiliée avant terme
+  ECHUE                  // Arrivée à échéance sans renouvellement
+  ANNULEE                // Annulée avant signature
+}
+
+enum LdmDureeType {
+  ANNUELLE_TACITE        // 1 an, tacite reconduction (le plus courant)
+  PLURIANNUELLE          // Durée fixe > 1 an
+  MISSION_PONCTUELLE     // Durée liée à la mission (audit, évaluation...)
+}
+
+enum LdmEvenementType {
+  CREATION
+  MODIFICATION
+  VALIDATION_INTERNE
+  ENVOI_CLIENT
+  RELANCE_CLIENT
+  SIGNATURE
+  RESILIATION
+  RENOUVELLEMENT
+  AVENANT_CREE
+  ANNULATION
+}
+
+enum ClauseCategorie {
+  TRONC_COMMUN           // Clauses applicables à toutes les LDM
+  MISSION_TENUE          // Tenue comptable
+  MISSION_REVISION       // Révision / présentation des comptes
+  MISSION_SOCIAL         // Paie, déclarations sociales
+  MISSION_JURIDIQUE      // Secrétariat juridique
+  MISSION_FISCAL         // Déclarations fiscales, conseil fiscal
+  MISSION_CONSEIL        // Conseil ponctuel
+  MISSION_AUDIT          // Audit contractuel
+  ANNEXE                 // CGV, grille tarifaire, RGPD détaillé
+}
+
+// =============================================================================
+// LETTRE DE MISSION (entité principale)
+// =============================================================================
+model LettreDeMission {
+  id                  String      @id @default(cuid())
+  numero              String      @unique // ex: "LDM-2026-0042"
+
+  // --- Liens ---
+  clientId            String
+  client              Client      @relation(fields: [clientId], references: [id])
+  devisId             String?     @unique // une LDM peut exister sans devis (mission récurrente)
+  devis               Devis?      @relation(fields: [devisId], references: [id])
+
+  // Référence éventuelle à une LDM antérieure (avenant, renouvellement)
+  ldmParenteId        String?
+  ldmParente          LettreDeMission?  @relation("LdmHistorique", fields: [ldmParenteId], references: [id])
+  ldmEnfants          LettreDeMission[] @relation("LdmHistorique")
+  estAvenant          Boolean     @default(false)
+  estRenouvellement   Boolean     @default(false)
+
+  // --- Statut & cycle de vie ---
+  statut              LdmStatut   @default(BROUILLON)
+  datePriseEffet      DateTime
+  dureeType           LdmDureeType @default(ANNUELLE_TACITE)
+  dureeMois           Int         @default(12)
+  dateEcheance        DateTime
+  dateResiliation     DateTime?
+  motifResiliation    String?     @db.Text
+
+  // --- Snapshot client (figé au moment de la génération) ---
+  snapshotClientSiren            String
+  snapshotClientDenomination     String
+  snapshotClientFormeJuridique   String
+  snapshotClientCapitalSocial    Decimal?    @db.Decimal(15, 2)
+  snapshotClientRcs              String?
+  snapshotClientAdresse          String      @db.Text
+  snapshotClientCodePostal       String
+  snapshotClientVille            String
+  snapshotClientPays             String      @default("France")
+  snapshotClientRepresentantNom  String      // dirigeant signataire
+  snapshotClientRepresentantQualite String   // ex: "Président", "Gérant"
+  snapshotClientEmail            String?
+  snapshotClientTelephone        String?
+
+  // --- Snapshot cabinet (au cas où l'organisation évolue) ---
+  snapshotCabinetDenomination    String      @default("Parfi France")
+  snapshotCabinetAdresse         String      @db.Text
+  snapshotCabinetSiren           String
+  snapshotCabinetRcs             String
+  snapshotCabinetEmail           String
+  snapshotCabinetTelephone       String
+
+  // --- Honoraires & facturation (figés depuis le devis) ---
+  honorairesHTAnnuelTotal        Decimal     @db.Decimal(12, 2)
+  honorairesTVATaux              Decimal     @db.Decimal(5, 2) @default(20.00)
+  modaliteFacturation            String      // "Mensuel" | "Trimestriel" | "Annuel" | "À l'avancement"
+  modaliteReglement              String      // "Prélèvement SEPA" | "Virement à 30j" | etc.
+
+  // --- Affectation interne ---
+  collaborateurReferentId        String?
+  collaborateurReferent          User?       @relation("LdmReferent", fields: [collaborateurReferentId], references: [id])
+  associeSignataireId            String
+  associeSignataire              User        @relation("LdmAssocie", fields: [associeSignataireId], references: [id])
+
+  // --- Document généré ---
+  documentPdfUrl                 String?     // PDF non signé envoyé au client
+  documentSigneUrl               String?     // PDF signé uploadé après retour client
+  documentHash                   String?     // SHA-256 du PDF pour intégrité
+
+  // --- Relations enfants ---
+  missions                       LdmMission[]
+  clausesAppliquees              LdmClauseSnapshot[]
+  echeancesFacturation           LdmEcheanceFacturation[]
+  evenements                     LdmEvenement[]
+
+  // --- Audit ---
+  creePar                        User        @relation("LdmCreateur", fields: [creeParId], references: [id])
+  creeParId                      String
+  creeLe                         DateTime    @default(now())
+  modifieLe                      DateTime    @updatedAt
+
+  @@index([clientId])
+  @@index([statut])
+  @@index([dateEcheance])
+}
+
+// =============================================================================
+// MISSIONS DE LA LDM (snapshot des missions retenues du devis)
+// =============================================================================
+model LdmMission {
+  id                  String      @id @default(cuid())
+  ldmId               String
+  ldm                 LettreDeMission @relation(fields: [ldmId], references: [id], onDelete: Cascade)
+
+  // Type de mission (correspond aux ClauseCategorie MISSION_*)
+  type                ClauseCategorie
+  libelle             String      // ex: "Tenue de la comptabilité - exercice 2026"
+  description         String?     @db.Text
+
+  // Honoraires spécifiques à cette mission
+  honorairesHT        Decimal     @db.Decimal(12, 2)
+  uniteFacturation    String?     // "Forfait annuel" | "Bulletin de paie" | "Heure" | etc.
+  quantite            Decimal?    @db.Decimal(10, 2)
+
+  // Périodicité
+  dateDebut           DateTime
+  dateFin             DateTime?   // null = continue jusqu'à résiliation
+
+  ordre               Int         @default(0) // ordre d'affichage dans le document
+
+  @@index([ldmId])
+}
+
+// =============================================================================
+// CLAUSES APPLIQUÉES (snapshot des clauses au moment de la génération)
+// =============================================================================
+// Chaque LDM fige les clauses utilisées avec leur version exacte.
+// Si la bibliothèque est mise à jour plus tard, les LDM existantes ne changent pas.
+model LdmClauseSnapshot {
+  id                  String      @id @default(cuid())
+  ldmId               String
+  ldm                 LettreDeMission @relation(fields: [ldmId], references: [id], onDelete: Cascade)
+
+  // Référence à la clause source (pour traçabilité)
+  clauseSourceId      String
+  clauseSourceVersion Int         // version de la clause au moment du figement
+
+  categorie           ClauseCategorie
+  titre               String
+  contenu             String      @db.LongText // contenu HTML ou Markdown
+  ordre               Int         @default(0)
+
+  @@index([ldmId])
+  @@index([clauseSourceId])
+}
+
+// =============================================================================
+// ÉCHÉANCIER DE FACTURATION CONTRACTUEL
+// =============================================================================
+model LdmEcheanceFacturation {
+  id                  String      @id @default(cuid())
+  ldmId               String
+  ldm                 LettreDeMission @relation(fields: [ldmId], references: [id], onDelete: Cascade)
+
+  dateEcheance        DateTime
+  libelle             String      // ex: "Honoraires janvier 2026"
+  montantHT           Decimal     @db.Decimal(12, 2)
+
+  // Lien vers la facture émise (si déjà émise)
+  factureId           String?
+  // facture          Facture?    @relation(...)  // à brancher sur ton modèle Facture
+
+  @@index([ldmId])
+  @@index([dateEcheance])
+}
+
+// =============================================================================
+// AUDIT TRAIL
+// =============================================================================
+model LdmEvenement {
+  id                  String      @id @default(cuid())
+  ldmId               String
+  ldm                 LettreDeMission @relation(fields: [ldmId], references: [id], onDelete: Cascade)
+
+  type                LdmEvenementType
+  description         String      @db.Text
+  metadonnees         Json?       // données contextuelles (ex: ancien/nouveau statut)
+
+  acteurId            String
+  acteur              User        @relation(fields: [acteurId], references: [id])
+  date                DateTime    @default(now())
+
+  @@index([ldmId])
+  @@index([date])
+}
+
+// =============================================================================
+// BIBLIOTHÈQUE DE CLAUSES OEC (référentiel)
+// =============================================================================
+// Bibliothèque versionnée. Une clause peut évoluer, mais chaque LDM
+// conserve la version utilisée au moment de sa génération (cf. LdmClauseSnapshot).
+model BibliothequeClause {
+  id                  String      @id @default(cuid())
+  code                String      // ex: "TC-PREAMBULE", "MS-DECLA-DSN" - identifiant stable
+  categorie           ClauseCategorie
+  titre               String
+  contenu             String      @db.LongText
+  version             Int         @default(1)
+  estActive           Boolean     @default(true)
+  obligatoire         Boolean     @default(false) // true = systématiquement incluse
+  ordreParDefaut      Int         @default(0)
+
+  // Conditions d'activation (pour les clauses non obligatoires)
+  // Ex: { "missionTypes": ["MISSION_TENUE"], "siCapitalSuperieurA": 50000 }
+  conditionsActivation Json?
+
+  notesUsage          String?     @db.Text // commentaire interne pour les associés
+
+  creeLe              DateTime    @default(now())
+  modifieLe           DateTime    @updatedAt
+  modifieParId        String?
+  modifiePar          User?       @relation(fields: [modifieParId], references: [id])
+
+  @@unique([code, version])
+  @@index([categorie])
+  @@index([estActive])
+}

@@ -2,17 +2,36 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const { verifyToken, requireRole } = require('../middleware/auth');
+const { getVisibleUserIds, canManageOthers, inClause } = require('../utils/scope');
 
 router.get('/', verifyToken, async (req, res) => {
   try {
     const { client_id, utilisateur_id, statut, periode } = req.query;
-    const isExpertOrChef = ['expert', 'chef_mission'].includes(req.user.role);
+    const visibleIds = await getVisibleUserIds(pool, req.user);
 
-    let where = isExpertOrChef ? [] : ['t.utilisateur_id = ?'];
-    const params = isExpertOrChef ? [] : [req.user.id];
+    const where = [];
+    const params = [];
+
+    // Scope filter: restrict to visible users
+    if (visibleIds !== null) {
+      if (utilisateur_id) {
+        // Manager filtered to a specific user — must be in their scope
+        const uid = Number(utilisateur_id);
+        if (!visibleIds.includes(uid)) return res.json([]);
+        where.push('t.utilisateur_id = ?');
+        params.push(uid);
+      } else {
+        const { clause, params: p } = inClause(visibleIds, 't.utilisateur_id');
+        where.push(clause.replace('AND ', ''));
+        params.push(...p);
+      }
+    } else if (utilisateur_id) {
+      // Expert filtering to a specific user
+      where.push('t.utilisateur_id = ?');
+      params.push(utilisateur_id);
+    }
 
     if (client_id) { where.push('t.client_id = ?'); params.push(client_id); }
-    if (utilisateur_id && isExpertOrChef) { where.push('t.utilisateur_id = ?'); params.push(utilisateur_id); }
     if (statut) { where.push('t.statut = ?'); params.push(statut); }
 
     if (periode) {
@@ -48,11 +67,13 @@ router.get('/', verifyToken, async (req, res) => {
       `SELECT t.*,
          c.nom AS client_nom,
          u.prenom, u.nom AS user_nom,
-         ap.prenom AS assigne_par_prenom, ap.nom AS assigne_par_nom
+         ap.prenom AS assigne_par_prenom, ap.nom AS assigne_par_nom,
+         a.transcript AS appel_transcript
        FROM taches t
        LEFT JOIN clients c ON t.client_id = c.id
        LEFT JOIN utilisateurs u ON t.utilisateur_id = u.id
        LEFT JOIN utilisateurs ap ON t.assigne_par = ap.id
+       LEFT JOIN appels a ON t.appel_id = a.id
        ${whereClause}
        ORDER BY t.date_echeance ASC`,
       params
@@ -65,16 +86,24 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.post('/', verifyToken, async (req, res) => {
   const { client_id, utilisateur_id, titre, description, duree, date_echeance, source, priorite, categorie, type_travail } = req.body;
-  const isExpertOrChef = ['expert', 'chef_mission'].includes(req.user.role);
+  const isManager = canManageOthers(req.user);
 
   if (!date_echeance || (!titre && !description)) {
     return res.status(400).json({ message: 'Titre et échéance sont requis.' });
   }
 
-  // Collaborators can only create tasks for themselves
-  const targetUserId = isExpertOrChef ? (utilisateur_id || req.user.id) : req.user.id;
-  if (!isExpertOrChef && utilisateur_id && Number(utilisateur_id) !== req.user.id) {
+  let targetUserId = isManager ? (utilisateur_id || req.user.id) : req.user.id;
+
+  if (!isManager && utilisateur_id && Number(utilisateur_id) !== req.user.id) {
     return res.status(403).json({ message: 'Vous ne pouvez créer des tâches que pour vous-même.' });
+  }
+
+  // Managers can only assign within their scope
+  if (isManager && utilisateur_id && req.user.role !== 'expert') {
+    const visibleIds = await getVisibleUserIds(pool, req.user);
+    if (visibleIds && !visibleIds.includes(Number(utilisateur_id))) {
+      return res.status(403).json({ message: 'Cet utilisateur n\'est pas dans votre périmètre.' });
+    }
   }
 
   try {
@@ -97,11 +126,10 @@ router.post('/', verifyToken, async (req, res) => {
       ]
     );
 
-    // Notify the assignee when a manager assigns the task to someone else
     if (Number(targetUserId) !== req.user.id) {
       const [[assigner]] = await pool.query('SELECT prenom, nom FROM utilisateurs WHERE id = ?', [req.user.id]);
-      const name    = assigner ? `${assigner.prenom} ${assigner.nom}` : 'Votre responsable';
-      const label   = titre || description;
+      const name  = assigner ? `${assigner.prenom} ${assigner.nom}` : 'Votre responsable';
+      const label = titre || description;
       await pool.query(
         `INSERT INTO notifications (utilisateur_id, type, titre, message, lien, lue)
          VALUES (?, 'tache_assignee', 'Nouvelle tâche assignée', ?, '/taches', 0)`,
@@ -118,7 +146,7 @@ router.post('/', verifyToken, async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   const { titre, description, duree, date_echeance, statut, reports, priorite, categorie, utilisateur_id,
           type_travail, temps_passe_minutes, sous_categorie_non_facturable } = req.body;
-  const isExpertOrChef = ['expert', 'chef_mission'].includes(req.user.role);
+  const isManager = canManageOthers(req.user);
   try {
     const [[prevTask]] = await pool.query(
       `SELECT t.statut, t.date_echeance, t.utilisateur_id, t.assigne_par, t.titre, t.description,
@@ -128,6 +156,14 @@ router.put('/:id', verifyToken, async (req, res) => {
        WHERE t.id = ?`,
       [req.params.id]
     );
+
+    // Verify the task is in scope for this user
+    if (prevTask) {
+      const visibleIds = await getVisibleUserIds(pool, req.user);
+      if (visibleIds !== null && !visibleIds.includes(prevTask.utilisateur_id)) {
+        return res.status(403).json({ message: 'Accès refusé à cette tâche.' });
+      }
+    }
 
     const fields = [];
     const values = [];
@@ -143,8 +179,14 @@ router.put('/:id', verifyToken, async (req, res) => {
     if (temps_passe_minutes !== undefined) { fields.push('temps_passe_minutes = ?'); values.push(parseInt(temps_passe_minutes) || 0); }
     if (sous_categorie_non_facturable !== undefined) { fields.push('sous_categorie_non_facturable = ?'); values.push(sous_categorie_non_facturable || null); }
 
-    // Only managers can reassign
-    if (utilisateur_id !== undefined && isExpertOrChef) {
+    // Only managers can reassign, and only within their scope
+    if (utilisateur_id !== undefined && isManager) {
+      if (req.user.role !== 'expert') {
+        const visibleIds = await getVisibleUserIds(pool, req.user);
+        if (visibleIds && !visibleIds.includes(Number(utilisateur_id))) {
+          return res.status(403).json({ message: 'Cet utilisateur n\'est pas dans votre périmètre.' });
+        }
+      }
       fields.push('utilisateur_id = ?');
       values.push(utilisateur_id);
     }
@@ -154,7 +196,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     await pool.query(`UPDATE taches SET ${fields.join(', ')} WHERE id = ?`, values);
 
     // Notify new assignee on reassignment
-    if (utilisateur_id !== undefined && isExpertOrChef && prevTask &&
+    if (utilisateur_id !== undefined && isManager && prevTask &&
         Number(utilisateur_id) !== prevTask.utilisateur_id) {
       const [[assigner]] = await pool.query('SELECT prenom, nom FROM utilisateurs WHERE id = ?', [req.user.id]);
       const name  = assigner ? `${assigner.prenom} ${assigner.nom}` : 'Votre responsable';
@@ -170,7 +212,6 @@ router.put('/:id', verifyToken, async (req, res) => {
       const assigneeId = prevTask.utilisateur_id;
       const today = new Date(); today.setHours(0, 0, 0, 0);
 
-      // Notify assignee when task becomes overdue
       const isRetardStatut = statut === 'retard' && prevTask.statut !== 'retard';
       const newEcheance = date_echeance ? new Date(date_echeance) : null;
       const isEcheancePassee = newEcheance && newEcheance < today && prevTask.statut !== 'retard';
@@ -182,7 +223,6 @@ router.put('/:id', verifyToken, async (req, res) => {
         );
       }
 
-      // Notify the assigner (superior) when task is marked as done
       const wasNotDone = prevTask.statut !== 'termine';
       const isNowDone  = statut === 'termine';
       const assignerId = prevTask.assigne_par;
