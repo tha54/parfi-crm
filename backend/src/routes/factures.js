@@ -28,11 +28,15 @@ router.get('/', verifyToken, async (req, res) => {
       `SELECT f.*,
               c.nom  AS client_nom,
               u.prenom AS collab_prenom, u.nom AS collab_nom,
-              lm.numero AS ldm_numero
+              lm.numero AS ldm_numero,
+              COALESCE(d.id, lm.devis_id) AS devis_id_resolved,
+              COALESCE(d.numero, dlm.numero) AS devis_numero
        FROM factures f
        LEFT JOIN clients c  ON f.client_id = c.id
        LEFT JOIN utilisateurs u ON f.collaborateur_referent_id = u.id
        LEFT JOIN lettres_mission lm ON f.lettre_mission_id = lm.id
+       LEFT JOIN devis d  ON f.devisId = d.id
+       LEFT JOIN devis dlm ON lm.devis_id = dlm.id
        WHERE ${where.join(' AND ')}
        ORDER BY f.mois_facturation DESC, f.createdAt DESC`,
       params
@@ -60,11 +64,15 @@ router.get('/:id', verifyToken, async (req, res) => {
       `SELECT f.*,
               c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse,
               u.prenom AS collab_prenom, u.nom AS collab_nom,
-              lm.numero AS ldm_numero
+              lm.numero AS ldm_numero,
+              COALESCE(d.id, lm.devis_id) AS devis_id_resolved,
+              COALESCE(d.numero, dlm.numero) AS devis_numero
        FROM factures f
        LEFT JOIN clients c ON f.client_id = c.id
        LEFT JOIN utilisateurs u ON f.collaborateur_referent_id = u.id
        LEFT JOIN lettres_mission lm ON f.lettre_mission_id = lm.id
+       LEFT JOIN devis d  ON f.devisId = d.id
+       LEFT JOIN devis dlm ON lm.devis_id = dlm.id
        WHERE f.id = ?`,
       [req.params.id]
     );

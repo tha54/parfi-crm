@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -34,6 +35,7 @@ function fmtMois(d) {
 // ─── Drawer détail ─────────────────────────────────────────────────────────
 
 function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
+  const navigate = useNavigate();
   const [f, setF] = useState(null);
   const [aide, setAide] = useState(null);
   const [showAide, setShowAide] = useState(false);
@@ -49,10 +51,21 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
 
   useEffect(() => { if (factureId) load(); }, [factureId, load]);
 
+  const [successMsg, setSuccessMsg] = useState('');
+
   const action = async (endpoint, body) => {
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setSuccessMsg('');
     try {
-      await api.post(`/factures/${factureId}/${endpoint}`, body || {});
+      const r = await api.post(`/factures/${factureId}/${endpoint}`, body || {});
+      if (endpoint === 'emettre') {
+        if (r.data.email_envoye) {
+          setSuccessMsg(`✅ Facture émise et envoyée par email à ${r.data.email_destinataire}`);
+        } else if (r.data.email_destinataire === null) {
+          setSuccessMsg('⚠️ Facture émise — aucun email client renseigné, envoi impossible');
+        } else {
+          setSuccessMsg('⚠️ Facture émise — échec de l\'envoi email (vérifiez la config Brevo)');
+        }
+      }
       await load();
       onRefresh();
     } catch (e) { setErr(e.response?.data?.message || 'Erreur'); }
@@ -91,13 +104,15 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
 
         <div className="drawer-body" style={{ overflowY: 'auto' }}>
           {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+          {successMsg && <div className="alert alert-success" style={{ marginBottom: 12 }}>{successMsg}</div>}
 
           {/* En-tête */}
           <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
             <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Client</div><strong>{f.client_nom || '—'}</strong></div>
             <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Statut</div><StatutBadge s={f.statut} /></div>
             <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Mois</div>{fmtMois(f.mois_facturation)}</div>
-            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>LDM</div>{f.ldm_numero || '—'}</div>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>LDM</div>{f.ldm_numero ? <a onClick={() => window.open(`/api/lettres-mission/${f.lettre_mission_id}/pdf?token=${localStorage.getItem('parfi_token')}`, '_blank')} style={{ color: '#0891b2', textDecoration: 'none', fontWeight: 600, cursor: 'pointer' }}>📋 {f.ldm_numero}</a> : '—'}</div>
+            <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Devis</div>{f.devis_numero ? <a onClick={() => window.open(`/api/devis/${f.devis_id_resolved}/pdf?token=${localStorage.getItem('parfi_token')}`, '_blank')} style={{ color: '#8b5cf6', textDecoration: 'none', fontWeight: 600, cursor: 'pointer' }}>📄 {f.devis_numero}</a> : '—'}</div>
             <div><div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Collaborateur</div>{f.collab_prenom ? `${f.collab_prenom} ${f.collab_nom}` : '—'}</div>
           </div>
 
@@ -160,52 +175,33 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
           )}
 
           {/* Actions */}
-          {isExpert && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-              {f.statut === 'brouillon' && (
-                <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => action('marquer-vu')}>
-                  ✅ Valider brouillon
-                </button>
-              )}
-              {['brouillon', 'vu'].includes(f.statut) && (
-                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => action('emettre')}>
-                  🚀 Émettre
-                </button>
-              )}
-              {['emise', 'envoyee', 'retard'].includes(f.statut) && (
-                <button className="btn btn-success btn-sm" disabled={busy} onClick={() => action('marquer-payee')}>
-                  💰 Marquer payée
-                </button>
-              )}
-              {!['payee', 'annulee'].includes(f.statut) && (
-                showAnnulForm ? (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+            {/* Changement de statut rapide — experts */}
+            {isExpert && !['payee', 'annulee'].includes(f.statut) && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 8, padding: '6px 10px' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Changer statut :</span>
+                {['brouillon', 'vu'].includes(f.statut) && (
+                  <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => action('emettre')}>🚀 Émettre</button>
+                )}
+                {['emise', 'envoyee', 'retard'].includes(f.statut) && (
+                  <button className="btn btn-success btn-sm" disabled={busy} onClick={() => action('marquer-payee')}>💰 Payée</button>
+                )}
+                {showAnnulForm ? (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      className="form-control form-control-sm"
-                      style={{ width: 200 }}
-                      placeholder="Motif d'annulation"
-                      value={motifAnnul}
-                      onChange={e => setMotifAnnul(e.target.value)}
-                    />
+                    <input className="form-control form-control-sm" style={{ width: 180 }}
+                      placeholder="Motif d'annulation" value={motifAnnul}
+                      onChange={e => setMotifAnnul(e.target.value)} />
                     <button className="btn btn-danger btn-sm" disabled={busy || !motifAnnul}
-                      onClick={() => action('annuler', { motif: motifAnnul })}>
-                      Confirmer
-                    </button>
+                      onClick={() => action('annuler', { motif: motifAnnul })}>Confirmer</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => setShowAnnulForm(false)}>✕</button>
                   </div>
                 ) : (
                   <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }}
-                    onClick={() => setShowAnnulForm(true)}>
-                    🚫 Annuler
-                  </button>
-                )
-              )}
-              <a href={`/api/factures/${factureId}/pdf?token=${localStorage.getItem('token')}`}
-                target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-                📄 PDF
-              </a>
-            </div>
-          )}
+                    onClick={() => setShowAnnulForm(true)}>🚫 Annuler</button>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Aide à la décision */}
           <div>
@@ -318,6 +314,7 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
 
 export default function Factures() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [factures, setFactures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -472,7 +469,7 @@ export default function Factures() {
                 <th>Numéro</th>
                 <th>Client</th>
                 <th>Mois</th>
-                <th>LDM</th>
+                <th>Origine</th>
                 <th>Collaborateur</th>
                 <th>Émission prévue</th>
                 <th style={{ textAlign: 'right' }}>HT</th>
@@ -497,7 +494,25 @@ export default function Factures() {
                   </td>
                   <td><strong>{f.client_nom || '—'}</strong></td>
                   <td style={{ fontSize: 13 }}>{fmtMois(f.mois_facturation)}</td>
-                  <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{f.ldm_numero || '—'}</td>
+                  <td style={{ fontSize: 11 }}>
+                    {f.ldm_numero && (
+                      <a
+                        onClick={e => { e.stopPropagation(); navigate(`/lettres-mission/${f.lettre_mission_id}`); }}
+                        style={{ display: 'inline-block', fontWeight: 600, color: '#0891b2', background: '#0891b210',
+                                 border: '1px solid #0891b240', borderRadius: 10, padding: '1px 7px',
+                                 cursor: 'pointer', textDecoration: 'none', marginRight: 4 }}
+                      >📋 {f.ldm_numero}</a>
+                    )}
+                    {f.devis_numero && (
+                      <a
+                        onClick={e => { e.stopPropagation(); navigate(`/devis/${f.devis_id_resolved}`); }}
+                        style={{ display: 'inline-block', fontWeight: 600, color: '#8b5cf6', background: '#8b5cf610',
+                                 border: '1px solid #8b5cf640', borderRadius: 10, padding: '1px 7px',
+                                 cursor: 'pointer', textDecoration: 'none' }}
+                      >📄 {f.devis_numero}</a>
+                    )}
+                    {!f.ldm_numero && !f.devis_numero && <span style={{ color: 'var(--text-secondary)' }}>—</span>}
+                  </td>
                   <td style={{ fontSize: 12 }}>
                     {f.collab_prenom ? `${f.collab_prenom} ${f.collab_nom}` : '—'}
                   </td>

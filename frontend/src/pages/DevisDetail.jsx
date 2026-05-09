@@ -21,7 +21,7 @@ const STATUT_COLORS = {
 };
 
 const ENTITE_LABELS = { ei: 'EI', societe: 'Société', association: 'Association' };
-const FISCAL_LABELS = { micro: 'Micro', reel_simplifie: 'Réel simplifié', reel_normal: 'Réel normal', bnc: 'BNC', ba: 'BA', sci: 'SCI (IR)' };
+const FISCAL_LABELS = { micro: 'Micro', reel_simplifie: 'Réel simplifié', reel_normal: 'Réel normal', bnc: 'BNC', ba: 'BA', sci: 'SCI (IR)', ir: 'IR', is: 'IS' };
 const TVA_LABELS    = { mensuel: 'Mensuel', trimestriel: 'Trimestriel', franchise: 'Franchise', neant: 'Néant' };
 const SECTION_COLORS = { Comptabilité: '#1d4ed8', Fiscalité: '#b45309', Social: '#15803d', Juridique: '#7c3aed' };
 
@@ -30,6 +30,42 @@ function StatutBadge({ s }) {
     <span style={{ fontSize: 13, fontWeight: 700, padding: '4px 12px', borderRadius: 20, background: (STATUT_COLORS[s] || '#6b7c93') + '18', color: STATUT_COLORS[s] || '#6b7c93', border: `1px solid ${(STATUT_COLORS[s] || '#6b7c93')}40` }}>
       {STATUTS[s] || s}
     </span>
+  );
+}
+
+/** Bandeau "Prochaine étape" — guide l'utilisateur dans le workflow Devis. */
+function NextStepCard({ title, subtitle, description, primary, secondaries = [], color = 'var(--accent)' }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 18,
+      padding: '16px 20px', marginBottom: 20,
+      borderRadius: 10, border: `1px solid ${color}40`,
+      background: `${color}0d`, borderLeft: `4px solid ${color}`,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color, padding: '2px 8px', background: `${color}1a`, borderRadius: 10 }}>
+            {subtitle}
+          </span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+        </div>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{description}</p>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {secondaries.map((b, i) => (
+          <button key={i} className="btn btn-ghost btn-sm" onClick={b.onClick} disabled={b.disabled}
+            style={b.color ? { borderColor: b.color, color: b.color } : undefined}>
+            {b.label}
+          </button>
+        ))}
+        {primary && (
+          <button className="btn btn-primary" onClick={primary.onClick} disabled={primary.disabled}
+            style={{ background: primary.color || color, borderColor: primary.color || color }}>
+            {primary.label}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -67,7 +103,7 @@ export default function DevisDetail() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [signModal, setSignModal] = useState(false);
+  const [acceptConfirmModal, setAcceptConfirmModal] = useState(false);
   const [emailModal, setEmailModal] = useState(null); // { nomContact, resolve }
   const [emailInput, setEmailInput] = useState('');
   const [generatingPlan, setGeneratingPlan] = useState(false);
@@ -225,33 +261,6 @@ export default function DevisDetail() {
               </button>
           }
           <button className="btn btn-ghost btn-sm" onClick={dupliquer} disabled={busy}>📋 Dupliquer</button>
-          {canEdit && devis.statut === 'brouillon' && (
-            <>
-              <button className="btn btn-ghost" onClick={() => navigate(`/devis/new?edit=${id}`)}>✏️ Modifier</button>
-              <button className="btn btn-ghost" onClick={() => envoyer()} disabled={busy}>📤 Envoyer pour signature</button>
-            </>
-          )}
-          {canEdit && devis.statut === 'envoye' && (
-            <>
-              <button className="btn btn-ghost" style={{ borderColor: '#00897b', color: '#00897b' }} onClick={accepter} disabled={busy}>✓ Marquer comme signé → LDM créée</button>
-              <button className="btn btn-ghost" style={{ borderColor: '#e74c3c', color: '#e74c3c' }} onClick={refuser} disabled={busy}>✗ Refusé</button>
-            </>
-          )}
-          {devis.statut === 'accepte' && devis.ldm_id && (
-            <button className="btn btn-primary" onClick={() => navigate(`/lettres-mission/${devis.ldm_id}`)} style={{ background: '#0f1f4b' }}>
-              Voir la LDM →
-            </button>
-          )}
-          {canEdit && devis.statut === 'accepte' && !devis.ldm_id && (
-            <button className="btn btn-primary" onClick={convertirLDM} disabled={busy} style={{ background: '#0f1f4b' }}>
-              {busy ? 'Création…' : '📋 Créer la LDM'}
-            </button>
-          )}
-          {canEdit && devis.statut === 'accepte' && (
-            <button className="btn btn-ghost btn-sm" onClick={genererPlanFacturation} disabled={generatingPlan} style={{ borderColor: '#00897b', color: '#00897b' }}>
-              {generatingPlan ? 'Génération…' : '💳 Générer plan de facturation'}
-            </button>
-          )}
           {user?.role === 'expert' && devis.statut === 'brouillon' && (
             <button className="btn btn-danger btn-sm" onClick={deleteDevis}>🗑</button>
           )}
@@ -264,6 +273,81 @@ export default function DevisDetail() {
             {msg.text}
             <button onClick={() => setMsg(null)} style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
           </div>
+        )}
+
+        {/* Bandeau "Prochaine étape" — guide le workflow */}
+        {canEdit && devis.statut === 'brouillon' && (
+          <NextStepCard
+            subtitle="Étape 1 / 3"
+            title="Brouillon — pas encore envoyé"
+            description="Le devis est en cours d'édition. Tu peux encore le modifier librement. Quand tu cliques « Envoyer pour signature », un email part automatiquement au client."
+            primary={{ label: '📤 Envoyer pour signature', onClick: () => envoyer(), disabled: busy }}
+            secondaries={[
+              { label: '✏️ Modifier le devis', onClick: () => navigate(`/devis?edit=${id}`) },
+            ]}
+            color="#6b7c93"
+          />
+        )}
+        {canEdit && devis.statut === 'envoye' && (
+          <NextStepCard
+            subtitle="Étape 2 / 3"
+            title={devis.yousign_request_id
+              ? '✍️ Signature électronique en cours (Yousign)'
+              : 'Envoyé — en attente du devis signé du client'}
+            description={devis.yousign_request_id
+              ? `Le document a été envoyé via Yousign pour signature électronique. La LDM sera créée automatiquement dès que le client aura signé en ligne. Aucune action manuelle requise.`
+              : "Le devis a été envoyé au client par email. Tant que tu n'as pas reçu le devis signé en retour, la lettre de mission ne peut pas être créée."}
+            primary={devis.yousign_request_id ? null : {
+              label: '✓ Devis signé reçu — créer la LDM',
+              onClick: () => setAcceptConfirmModal(true),
+              disabled: busy,
+              color: '#00897b',
+            }}
+            secondaries={[
+              ...(devis.yousign_request_id ? [] : [{ label: '↻ Renvoyer par email', onClick: () => envoyer(), disabled: busy }]),
+              { label: '✗ Refusé', onClick: refuser, disabled: busy, color: '#e74c3c' },
+            ]}
+            color="#f59e0b"
+          />
+        )}
+        {canEdit && devis.statut === 'accepte' && devis.ldm_id && (
+          <NextStepCard
+            subtitle="Étape 3 / 3"
+            title="Signé ✓ — LDM créée"
+            description={`La lettre de mission ${devis.ldm_numero ? `« ${devis.ldm_numero} » ` : ''}a été générée. La suite du workflow (envoi, signature, échéancier) se passe sur la LDM.`}
+            primary={{ label: 'Voir la LDM →', onClick: () => navigate(`/lettres-mission/${devis.ldm_id}`), color: '#0f1f4b' }}
+            secondaries={[
+              { label: generatingPlan ? '⏳ Génération…' : '💳 Générer plan de facturation', onClick: genererPlanFacturation, disabled: generatingPlan, color: '#00897b' },
+            ]}
+            color="#00897b"
+          />
+        )}
+        {canEdit && devis.statut === 'accepte' && !devis.ldm_id && (
+          <NextStepCard
+            subtitle="Étape 3 / 3"
+            title="Signé — LDM à créer"
+            description="Le devis est signé mais la lettre de mission n'a pas encore été créée. Lance la création pour passer à l'étape suivante."
+            primary={{ label: '📋 Créer la LDM', onClick: convertirLDM, disabled: busy, color: '#0f1f4b' }}
+            color="#00897b"
+          />
+        )}
+        {canEdit && devis.statut === 'refuse' && (
+          <NextStepCard
+            subtitle="Refusé"
+            title="Le client n'a pas donné suite"
+            description="Tu peux dupliquer ce devis pour repartir d'une nouvelle base avec un prix ou un périmètre ajusté."
+            primary={{ label: '📋 Dupliquer pour repartir', onClick: dupliquer, disabled: busy }}
+            color="#e74c3c"
+          />
+        )}
+        {canEdit && devis.statut === 'expire' && (
+          <NextStepCard
+            subtitle="Expiré"
+            title="Validité dépassée"
+            description="La date de validité est passée. Duplique pour créer une nouvelle version à jour."
+            primary={{ label: '📋 Dupliquer', onClick: dupliquer, disabled: busy }}
+            color="#9ca3af"
+          />
         )}
 
         {/* Pipeline statut visuel */}
@@ -405,18 +489,6 @@ export default function DevisDetail() {
               </div>
             </div>
 
-            {/* Changer statut (brouillon uniquement) */}
-            {canEdit && devis.statut === 'brouillon' && (
-              <div className="card">
-                <div className="card-header"><span className="card-title">Changer le statut</span></div>
-                <div className="card-body" style={{ paddingTop: 10, paddingBottom: 10 }}>
-                  <select className="form-control" value={devis.statut} disabled={busy}
-                    onChange={e => action(() => api.post(`/devis/${id}/${e.target.value === 'envoye' ? 'envoyer' : e.target.value === 'accepte' ? 'accepter' : 'refuser'}`), `Statut : ${STATUTS[e.target.value]}`)}>
-                    {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -443,6 +515,45 @@ export default function DevisDetail() {
           </div>
         )}
       </div>
+
+      {/* Modal de confirmation — réception du devis signé */}
+      {acceptConfirmModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setAcceptConfirmModal(false)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 10, padding: 28, width: 460, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+            <h3 style={{ margin: '0 0 12px', color: '#0f1f4b', fontSize: 16 }}>
+              Confirmation — devis signé reçu ?
+            </h3>
+            <p style={{ margin: '0 0 8px', fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
+              Tu t'apprêtes à marquer le devis <strong>{devis.numero}</strong> comme accepté.
+            </p>
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e', marginBottom: 4 }}>
+                ⚠️ Cette action est définitive
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#78350f', lineHeight: 1.6 }}>
+                <li>Le devis sera verrouillé (plus modifiable)</li>
+                <li>La lettre de mission sera créée automatiquement</li>
+                <li>L'opportunité passera en « Devis accepté »</li>
+              </ul>
+            </div>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#374151' }}>
+              Confirmes-tu avoir bien <strong>reçu le devis signé</strong> du client ?
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setAcceptConfirmModal(false)} disabled={busy}>
+                Annuler
+              </button>
+              <button className="btn btn-primary" disabled={busy}
+                style={{ background: '#00897b', borderColor: '#00897b' }}
+                onClick={() => { setAcceptConfirmModal(false); accepter(); }}>
+                {busy ? 'Création…' : '✓ Oui, créer la LDM'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal email manquant */}
       {emailModal && (

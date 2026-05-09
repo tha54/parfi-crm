@@ -48,6 +48,7 @@ const chargeTravailRoutes = require('./routes/chargeTravail');
 const activiteRoutes = require('./routes/activite');
 const alertesFacturationRoutes = require('./routes/alertesFacturation');
 const { router: powensRoutes, handleWebhook: powensWebhook } = require('./routes/powens');
+const signaturesRoutes = require('./routes/signatures');
 
 const { startScheduler } = require('./scheduler');
 
@@ -60,12 +61,28 @@ app.use(cors({
   ],
   credentials: true,
 }));
+// Capture rawBody avant parsing JSON (nécessaire pour vérification signature Yousign)
+app.use((req, res, next) => {
+  if (req.path === '/api/signatures/webhook') {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      req.rawBody = data;
+      try { req.body = JSON.parse(data); } catch { req.body = {}; }
+      next();
+    });
+  } else {
+    next();
+  }
+});
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static file serving for uploads preview
 app.use('/uploads', express.static('/opt/parfi-data/documents'));
 
+app.use('/api/signatures', signaturesRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/utilisateurs', utilisateursRoutes);
 app.use('/api/clients', clientsRoutes);

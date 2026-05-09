@@ -106,17 +106,67 @@ async function copyChapitresLDM(conn, devisId, ldmId) {
   }
 }
 
-// Re-calculate and upsert lignes_devis for a given devis
-async function recalculerLignes(devisId, params, remise_pct = 0) {
-  const lignes = calculerLignes(params);
+// Build the canonical list of lignes to persist for a devis from the modal payload.
+// Combines explicit lignes_rapides (with extended fields from chiffrage) and, if
+// run_engine is true, runs the dimensionnement engine on top.
+function buildAllLignes({ run_engine, calcParams, rubriques_forfait, lignes_rapides }) {
+  const { lignes: lignesChiffre } = run_engine
+    ? calculerChiffrage({ params: calcParams, rubriques_forfait: rubriques_forfait || [] })
+    : { lignes: [] };
+  const lignesRapide = (lignes_rapides || [])
+    .filter(l => l.libelle && parseFloat(l.montant_ht) > 0)
+    .map(l => ({
+      libelle: l.libelle,
+      rubrique: l.rubrique || l.libelle,
+      section: l.section || null,
+      intervenant: l.intervenant || null,
+      periodicite: l.periodicite || 'Annuel',
+      temps_minutes: l.temps_minutes || 0,
+      tarif_ht: Math.round(parseFloat(l.montant_ht) * 100) / 100,
+      mode_suivi: l.mode_suivi || 'forfait',
+      mode_saisie: l.mode_saisie || 'rapide',
+      chapitre: l.chapitre || sectionToChapitre(l.section),
+    }));
+  return [
+    ...lignesChiffre.map(l => ({ ...l, mode_saisie: 'chiffre', chapitre: sectionToChapitre(l.section) })),
+    ...lignesRapide,
+  ];
+}
 
-  // Delete existing lines
+// Compute totals from lignes + optional chapitres_remise (per-chapter accepted amounts)
+// or fallback to a flat remise_pct.
+function computeTotals(allLignes, { chapitres_remise, remise_pct }) {
+  const totalHT = allLignes.reduce((s, l) => s + (parseFloat(l.tarif_ht) || 0), 0);
+  let totalAccepte;
+  if (chapitres_remise) {
+    const chapTotals = {};
+    for (const l of allLignes) {
+      if (l.chapitre) chapTotals[l.chapitre] = (chapTotals[l.chapitre] || 0) + parseFloat(l.tarif_ht || 0);
+    }
+    totalAccepte = Object.entries(chapTotals).reduce((s, [ch, th]) => {
+      const acc = chapitres_remise[ch]?.montant_accepte != null
+        ? parseFloat(chapitres_remise[ch].montant_accepte)
+        : th;
+      return s + acc;
+    }, 0);
+    totalAccepte += allLignes.filter(l => !l.chapitre).reduce((s, l) => s + parseFloat(l.tarif_ht || 0), 0);
+  } else {
+    const r = parseFloat(remise_pct) || 0;
+    totalAccepte = totalHT * (1 - r / 100);
+  }
+  totalAccepte = Math.round(totalAccepte * 100) / 100;
+  const remiseTotal = Math.round((totalHT - totalAccepte) * 100) / 100;
+  const tva = Math.round(totalAccepte * 0.2 * 100) / 100;
+  const totalTTC = Math.round((totalAccepte + tva) * 100) / 100;
+  const remisePctEffective = totalHT > 0 ? Math.round((remiseTotal / totalHT) * 10000) / 100 : 0;
+  return { totalHT, totalAccepte, remiseTotal, tva, totalTTC, remisePctEffective };
+}
+
+// Persist allLignes to lignes_devis (delete + insert) and update devis totals + chapitres.
+async function persistLignesAndTotals(devisId, allLignes, totals, chapitres_remise) {
   await pool.query('DELETE FROM lignes_devis WHERE devisId = ?', [devisId]);
-
-  let totalHT = 0;
-  for (let i = 0; i < lignes.length; i++) {
-    const l = lignes[i];
-    totalHT += l.tarif_ht || 0;
+  for (let i = 0; i < allLignes.length; i++) {
+    const l = allLignes[i];
     await pool.query(
       `INSERT INTO lignes_devis
          (devisId, ordre, description, quantite, prixUnitaireHT, remisePct, totalHT,
@@ -124,25 +174,19 @@ async function recalculerLignes(devisId, params, remise_pct = 0) {
        VALUES (?,?,?,1,?,0,?,?,?,?,?,?,?,1,?,?,?)`,
       [devisId, i, l.libelle, l.tarif_ht, l.tarif_ht,
        l.rubrique, l.section, l.intervenant, l.periodicite, l.temps_minutes, l.tarif_ht,
-       l.mode_suivi || 'temps', 'chiffre', sectionToChapitre(l.section)]
+       l.mode_suivi || 'temps', l.mode_saisie || 'chiffre', l.chapitre || null]
     );
   }
-
-  // Apply remise
-  const remise = parseFloat(remise_pct) || 0;
-  const totalHTNet = Math.round(totalHT * (1 - remise / 100) * 100) / 100;
-  const tva = Math.round(totalHTNet * 0.2 * 100) / 100;
-  const totalTTC = Math.round((totalHTNet + tva) * 100) / 100;
-  const mensuel = Math.round(totalHTNet / 12 * 100) / 100;
-
   await pool.query(
     `UPDATE devis SET totalHT=?, tauxTVA=20, totalTVA=?, totalTTC=?, total_ht_net=?,
      total_theorique_ht=?, remise_commerciale_ht=?, total_accepte_ht=?, remise_pct=? WHERE id=?`,
-    [totalHT, tva, totalTTC, totalHTNet, totalHT,
-     Math.round(totalHT - totalHTNet), totalHTNet, remise, devisId]
+    [totals.totalHT, totals.tva, totals.totalTTC, totals.totalAccepte, totals.totalHT,
+     totals.remiseTotal, totals.totalAccepte, totals.remisePctEffective, devisId]
   );
-
-  return { totalHT, totalHTNet, tva, totalTTC, mensuel, count: lignes.length };
+  const conn = await pool.getConnection();
+  try {
+    await upsertDevisChapitres(conn, devisId, allLignes, chapitres_remise);
+  } finally { conn.release(); }
 }
 
 // ── HTML generator ────────────────────────────────────────────────────────────
@@ -151,7 +195,7 @@ function generateDevisHTML(devis, lignesGrouped, cabinet) {
   const fmt = (n) => Number(n || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtLabel = {
     ei: 'Entreprise individuelle', societe: 'Société', association: 'Association',
-    micro: 'Micro-entreprise', reel_simplifie: 'Réel simplifié', reel_normal: 'Réel normal', bnc: 'BNC', ba: 'BA', sci: 'SCI (IR)',
+    micro: 'Micro-entreprise', reel_simplifie: 'Réel simplifié', reel_normal: 'Réel normal', bnc: 'BNC', ba: 'BA', sci: 'SCI (IR)', ir: 'IR', is: 'IS',
     mensuel: 'Mensuel', trimestriel: 'Trimestriel', franchise: 'Franchise en base', neant: 'Néant',
   };
 
@@ -605,49 +649,8 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
     const odVal = operations_diverses != null ? Number(operations_diverses) : null;
     const calcParams = { type_entite, regime_fiscal, regime_tva, nb_etablissements, factures_achat, factures_vente, lignes_banque, immobilisations, effectif, operations_diverses: odVal };
 
-    // Build all lines: mode chiffré (engine, only if requested) + mode rapide (manual)
-    const { lignes: lignesChiffre } = run_engine
-      ? calculerChiffrage({ params: calcParams, rubriques_forfait })
-      : { lignes: [] };
-    const lignesRapide = (lignes_rapides || []).filter(l => l.libelle && parseFloat(l.montant_ht) > 0).map(l => ({
-      libelle: l.libelle, rubrique: l.libelle, section: l.section || null,
-      intervenant: null, periodicite: l.periodicite || 'Annuel',
-      temps_minutes: 0, tarif_ht: Math.round(parseFloat(l.montant_ht) * 100) / 100,
-      mode_suivi: 'forfait', mode_saisie: 'rapide', chapitre: l.chapitre || null,
-    }));
-
-    const allLignes = [
-      ...lignesChiffre.map(l => ({ ...l, mode_saisie: 'chiffre', chapitre: sectionToChapitre(l.section) })),
-      ...lignesRapide,
-    ];
-
-    const totalHT = allLignes.reduce((s, l) => s + (parseFloat(l.tarif_ht) || 0), 0);
-
-    // Compute total_accepte_ht from chapitres_remise or legacy remise_pct
-    let totalAccepte;
-    if (chapitres_remise) {
-      const chapTotals = {};
-      for (const l of allLignes) {
-        if (l.chapitre) chapTotals[l.chapitre] = (chapTotals[l.chapitre] || 0) + l.tarif_ht;
-      }
-      totalAccepte = Object.entries(chapTotals).reduce((s, [ch, th]) => {
-        const acc = chapitres_remise[ch]?.montant_accepte != null
-          ? parseFloat(chapitres_remise[ch].montant_accepte)
-          : th;
-        return s + acc;
-      }, 0);
-      // Add lines with no chapitre (Conseil/Autre) at full price
-      const sansChapitre = allLignes.filter(l => !l.chapitre).reduce((s, l) => s + l.tarif_ht, 0);
-      totalAccepte += sansChapitre;
-    } else {
-      const remise = parseFloat(remise_pct) || 0;
-      totalAccepte = Math.round(totalHT * (1 - remise / 100) * 100) / 100;
-    }
-    totalAccepte = Math.round(totalAccepte * 100) / 100;
-    const remiseTotal = Math.round((totalHT - totalAccepte) * 100) / 100;
-    const tva = Math.round(totalAccepte * 0.2 * 100) / 100;
-    const totalTTC = Math.round((totalAccepte + tva) * 100) / 100;
-    const remisePctEffective = totalHT > 0 ? Math.round((remiseTotal / totalHT) * 10000) / 100 : 0;
+    const allLignes = buildAllLignes({ run_engine, calcParams, rubriques_forfait, lignes_rapides });
+    const totals = computeTotals(allLignes, { chapitres_remise, remise_pct });
 
     const [result] = await pool.query(
       `INSERT INTO devis
@@ -661,14 +664,14 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
       [
         numero, client_id || null, prospect_id || null, resolvedOppId,
         titre, dateValidite || null,
-        totalHT, tva, totalTTC,
+        totals.totalHT, totals.tva, totals.totalTTC,
         notesInternes || null, notesClient || null,
         req.user.id,
         type_entite, regime_fiscal, regime_tva, nb_etablissements,
         factures_achat, factures_vente, lignes_banque,
         odVal ?? Math.round((Number(factures_achat) + Number(factures_vente)) * 0.1),
         immobilisations, effectif,
-        remisePctEffective, totalAccepte, totalHT, remiseTotal, totalAccepte,
+        totals.remisePctEffective, totals.totalAccepte, totals.totalHT, totals.remiseTotal, totals.totalAccepte,
       ]
     );
     const devisId = result.insertId;
@@ -677,24 +680,7 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
       await pool.query(`UPDATE opportunites SET devis_id = ? WHERE id = ?`, [devisId, resolvedOppId]);
     }
 
-    for (let i = 0; i < allLignes.length; i++) {
-      const l = allLignes[i];
-      await pool.query(
-        `INSERT INTO lignes_devis
-           (devisId, ordre, description, quantite, prixUnitaireHT, remisePct, totalHT,
-            rubrique, section, intervenant, periodicite, temps_minutes, tarif_ht, actif, mode_suivi, mode_saisie, chapitre)
-         VALUES (?,?,?,1,?,0,?,?,?,?,?,?,?,1,?,?,?)`,
-        [devisId, i, l.libelle, l.tarif_ht, l.tarif_ht,
-         l.rubrique, l.section, l.intervenant, l.periodicite, l.temps_minutes, l.tarif_ht,
-         l.mode_suivi || 'temps', l.mode_saisie || 'chiffre', l.chapitre || null]
-      );
-    }
-
-    // Insert chapitres summary
-    const conn = await pool.getConnection();
-    try {
-      await upsertDevisChapitres(conn, devisId, allLignes, chapitres_remise);
-    } finally { conn.release(); }
+    await persistLignesAndTotals(devisId, allLignes, totals, chapitres_remise);
 
     // Synchro prospect
     if (prospect_id) {
@@ -713,7 +699,7 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
       }
     }
 
-    res.status(201).json({ id: devisId, numero, opportunite_id: resolvedOppId, totalHT, totalHTNet: totalAccepte, totalTTC, lignesCount: allLignes.length });
+    res.status(201).json({ id: devisId, numero, opportunite_id: resolvedOppId, totalHT: totals.totalHT, totalHTNet: totals.totalAccepte, totalTTC: totals.totalTTC, lignesCount: allLignes.length });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', error: e.message }); }
 });
 
@@ -762,6 +748,7 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
       type_entite, regime_fiscal, regime_tva, nb_etablissements,
       factures_achat, factures_vente, lignes_banque, operations_diverses, immobilisations, effectif,
       remise_pct,
+      lignes_rapides, rubriques_forfait, run_engine, chapitres_remise,
     } = req.body;
 
     const fields = [], values = [];
@@ -780,30 +767,39 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     if (operations_diverses !== undefined){ fields.push('operations_diverses = ?');values.push(operations_diverses); }
     if (immobilisations !== undefined)    { fields.push('immobilisations = ?');    values.push(immobilisations); }
     if (effectif !== undefined)           { fields.push('effectif = ?');           values.push(effectif); }
-    if (remise_pct !== undefined)         { fields.push('remise_pct = ?');         values.push(remise_pct); }
 
     if (fields.length) {
       values.push(req.params.id);
       await pool.query(`UPDATE devis SET ${fields.join(', ')} WHERE id = ?`, values);
     }
 
-    // Re-calculate lines from updated params
-    const newParams = {
-      type_entite:          type_entite          ?? cur.type_entite,
-      regime_fiscal:        regime_fiscal        ?? cur.regime_fiscal,
-      regime_tva:           regime_tva           ?? cur.regime_tva,
-      nb_etablissements:    nb_etablissements    ?? cur.nb_etablissements,
-      factures_achat:       factures_achat       ?? cur.factures_achat,
-      factures_vente:       factures_vente       ?? cur.factures_vente,
-      lignes_banque:        lignes_banque        ?? cur.lignes_banque,
-      operations_diverses:  operations_diverses  != null ? Number(operations_diverses) : (cur.operations_diverses != null ? cur.operations_diverses : null),
-      immobilisations:      immobilisations      ?? cur.immobilisations,
-      effectif:             effectif             ?? cur.effectif,
-    };
-    const newRemise = remise_pct !== undefined ? remise_pct : cur.remise_pct;
-    const totals = await recalculerLignes(Number(req.params.id), newParams, newRemise);
+    // If the request carries the modal payload (lignes_rapides/run_engine/chapitres_remise),
+    // rebuild lignes_devis + totals exactly like POST. Otherwise leave lines untouched.
+    const hasNewPayload = lignes_rapides !== undefined || chapitres_remise !== undefined || run_engine !== undefined;
+    if (hasNewPayload) {
+      const calcParams = {
+        type_entite:          type_entite          ?? cur.type_entite,
+        regime_fiscal:        regime_fiscal        ?? cur.regime_fiscal,
+        regime_tva:           regime_tva           ?? cur.regime_tva,
+        nb_etablissements:    nb_etablissements    ?? cur.nb_etablissements,
+        factures_achat:       factures_achat       ?? cur.factures_achat,
+        factures_vente:       factures_vente       ?? cur.factures_vente,
+        lignes_banque:        lignes_banque        ?? cur.lignes_banque,
+        operations_diverses:  operations_diverses != null ? Number(operations_diverses) : (cur.operations_diverses != null ? cur.operations_diverses : null),
+        immobilisations:      immobilisations      ?? cur.immobilisations,
+        effectif:             effectif             ?? cur.effectif,
+      };
+      const allLignes = buildAllLignes({ run_engine, calcParams, rubriques_forfait, lignes_rapides });
+      const totals = computeTotals(allLignes, { chapitres_remise, remise_pct: remise_pct ?? cur.remise_pct });
+      await persistLignesAndTotals(Number(req.params.id), allLignes, totals, chapitres_remise);
+      return res.json({
+        message: 'Devis mis à jour',
+        totalHT: totals.totalHT, totalHTNet: totals.totalAccepte,
+        totalTTC: totals.totalTTC, count: allLignes.length,
+      });
+    }
 
-    res.json({ message: 'Devis mis à jour', ...totals });
+    res.json({ message: 'Devis mis à jour' });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', error: e.message }); }
 });
 
@@ -846,8 +842,9 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
     );
     if (d.opportunite_id) {
       pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE id = ?`, [d.opportunite_id]).catch(() => {});
-    }
-    if (d.client_id) {
+    } else if (d.prospect_id) {
+      pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE prospect_id = ? AND statut NOT IN ('gagne','perdu')`, [d.prospect_id]).catch(() => {});
+    } else if (d.client_id) {
       pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
     }
 
@@ -934,8 +931,46 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
 
         const nomClient = d.display_nom || destinataire;
         const ht = parseFloat(d.total_ht_net || d.totalHT || 0);
+
+        // ── Yousign (si configuré) — sinon fallback email ──────────────
+        const yousign = require('../utils/yousign');
+        if (yousign.isConfigured()) {
+          try {
+            const nameParts = (d.contact_prenom || d.contact_nom)
+              ? { firstName: d.contact_prenom || nomClient, lastName: d.contact_nom || '' }
+              : { firstName: nomClient, lastName: '' };
+
+            const { requestId, signerId, signingUrl } = await yousign.createSignatureRequest({
+              pdfBuffer,
+              filename:       `${d.numero}.pdf`,
+              requestName:    `Devis ${d.numero} — ParFi France`,
+              signer:         { email: destinataire, ...nameParts },
+              redirectSuccess: `https://163.172.158.24/devis/${d.id}?signed=1`,
+              expirationDays:  30,
+            });
+
+            await pool.query(
+              `UPDATE devis SET yousign_request_id = ?, yousign_signer_id = ?, yousign_signing_url = ?, yousign_status = 'pending' WHERE id = ?`,
+              [requestId, signerId, signingUrl, d.id]
+            );
+
+            return res.json({
+              message:    `Devis envoyé pour signature électronique via Yousign à ${destinataire}`,
+              statut:     'envoye',
+              email:      destinataire,
+              yousign:    true,
+              requestId,
+              signingUrl,
+            });
+          } catch (ysErr) {
+            console.error('[envoyer devis] Yousign erreur:', ysErr.message);
+            // Fallback vers email classique
+          }
+        }
+
+        // ── Fallback : envoi par email avec PDF en pièce jointe ─────────
         const mensuel = (ht / 12).toFixed(2).replace('.', ',');
-        const ttc = (ht * 1.2).toFixed(2).replace('.', ',');
+        const ttc     = (ht * 1.2).toFixed(2).replace('.', ',');
 
         const htmlContent = `
 <!DOCTYPE html><html lang="fr"><body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto;padding:20px;">
@@ -962,24 +997,27 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
   </p>
 </body></html>`;
 
-        const { sendEmail } = require('../utils/mailer');
-        await sendEmail({
-          to:          destinataire,
-          toName:      nomClient,
-          subject:     `Proposition d'honoraires ${d.numero} — ParFi France`,
-          htmlContent,
-          attachments: [{ base64: pdfBuffer.toString('base64'), filename: `${d.numero}.pdf` }],
-        });
-
-        return res.json({ message: 'Devis envoyé par email', statut: 'envoye', email: destinataire });
-      } catch (emailErr) {
-        // Email failed but status is already updated — report warning
-        console.error('[envoyer devis] email error:', emailErr.message);
-        return res.json({
-          message: `Statut mis à jour mais envoi email échoué : ${emailErr.message}`,
-          statut: 'envoye',
-          emailError: emailErr.message,
-        });
+        try {
+          const { sendEmail } = require('../utils/mailer');
+          await sendEmail({
+            to:          destinataire,
+            toName:      nomClient,
+            subject:     `Proposition d'honoraires ${d.numero} — ParFi France`,
+            htmlContent,
+            attachments: [{ base64: pdfBuffer.toString('base64'), filename: `${d.numero}.pdf` }],
+          });
+          return res.json({ message: 'Devis envoyé par email', statut: 'envoye', email: destinataire });
+        } catch (emailErr) {
+          console.error('[envoyer devis] email error:', emailErr.message);
+          return res.json({
+            message: `Statut mis à jour mais envoi email échoué : ${emailErr.message}`,
+            statut: 'envoye',
+            emailError: emailErr.message,
+          });
+        }
+      } catch (outerErr) {
+        console.error('[envoyer devis] erreur:', outerErr.message);
+        return res.json({ message: `Erreur lors de l'envoi : ${outerErr.message}`, statut: 'envoye' });
       }
     }
 
@@ -995,8 +1033,9 @@ router.post('/:id/accepter', verifyToken, requireRole('expert', 'chef_mission'),
     await pool.query(`UPDATE devis SET statut = 'accepte' WHERE id = ?`, [req.params.id]);
     if (d.opportunite_id) {
       pool.query(`UPDATE opportunites SET statut = 'devis_envoye', probabilite = 70, updatedAt = NOW() WHERE id = ?`, [d.opportunite_id]).catch(() => {});
-    }
-    if (d.client_id) {
+    } else if (d.prospect_id) {
+      pool.query(`UPDATE opportunites SET statut = 'devis_envoye', probabilite = 70, updatedAt = NOW() WHERE prospect_id = ? AND statut NOT IN ('gagne','perdu')`, [d.prospect_id]).catch(() => {});
+    } else if (d.client_id) {
       pool.query(`UPDATE opportunites SET statut = 'devis_envoye', probabilite = 70, updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
     }
 
@@ -1017,6 +1056,10 @@ router.post('/:id/refuser', verifyToken, requireRole('expert', 'chef_mission'), 
     await pool.query(`UPDATE devis SET statut = 'refuse' WHERE id = ?`, [req.params.id]);
     if (d.opportunite_id) {
       pool.query(`UPDATE opportunites SET statut = 'perdu', updatedAt = NOW() WHERE id = ?`, [d.opportunite_id]).catch(() => {});
+    } else if (d.prospect_id) {
+      pool.query(`UPDATE opportunites SET statut = 'perdu', updatedAt = NOW() WHERE prospect_id = ? AND statut NOT IN ('gagne','perdu')`, [d.prospect_id]).catch(() => {});
+    } else if (d.client_id) {
+      pool.query(`UPDATE opportunites SET statut = 'perdu', updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
     }
     res.json({ message: 'Devis refusé', statut: 'refuse' });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', error: e.message }); }
@@ -1161,8 +1204,24 @@ router.post('/:id/generer-plan-facturation', verifyToken, requireRole('expert', 
     const ldmId = devis.ldm_id || devis.ldm_id_real;
     if (ldmId) {
       const { genererFacturesDepuisLDM } = require('../utils/facturation');
-      const factureIds = await genererFacturesDepuisLDM(ldmId);
-      return res.json({ message: `${factureIds.length} facture(s) générée(s) depuis la LDM`, factureIds, source: 'ldm' });
+      const { factureIds, existed } = await genererFacturesDepuisLDM(ldmId);
+      const message = existed
+        ? `Plan déjà généré : ${factureIds.length} facture(s) liée(s) à la LDM`
+        : `${factureIds.length} facture(s) générée(s) depuis la LDM`;
+      return res.json({ message, factureIds, source: 'ldm', existed: !!existed });
+    }
+
+    // Dédoublonnage : refuser si des factures auto sont déjà liées à ce devis
+    const [existingFromDevis] = await pool.query(
+      'SELECT id FROM factures WHERE devisId = ? ORDER BY id', [devis.id]
+    );
+    if (existingFromDevis.length > 0) {
+      return res.json({
+        message: `Plan déjà généré : ${existingFromDevis.length} facture(s) liée(s) au devis`,
+        factureIds: existingFromDevis.map(r => r.id),
+        source: 'devis',
+        existed: true,
+      });
     }
 
     // Génération directe depuis le devis (mensuel par défaut)
@@ -1184,10 +1243,10 @@ router.post('/:id/generer-plan-facturation', verifyToken, requireRole('expert', 
       const numero   = await nextFactureNumero();
 
       const [r] = await pool.query(
-        `INSERT INTO factures (numero, client_id, type, statut, dateEmission, dateEcheance,
+        `INSERT INTO factures (numero, client_id, devisId, type, statut, dateEmission, dateEcheance,
           totalHT, tauxTVA, totalTVA, totalTTC, estRecurrente, periodeRecurrence, notesInternes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,1,'mensuelle',?)`,
-        [numero, devis.client_id, 'recurrence', 'brouillon',
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,1,'mensuelle',?)`,
+        [numero, devis.client_id, devis.id, 'recurrence', 'brouillon',
          emission, echeance, montantMois, tauxTVA, tvaMois, ttcMois,
          `Auto-générée depuis devis ${devis.numero}`]
       );
@@ -1208,7 +1267,7 @@ router.post('/:id/generer-plan-facturation', verifyToken, requireRole('expert', 
       [devis.client_id, montantHT, tauxTVA, JSON.stringify(factureIds)]
     ).catch(() => {});
 
-    res.json({ message: `${factureIds.length} facture(s) générée(s)`, factureIds, source: 'devis' });
+    res.json({ message: `${factureIds.length} facture(s) générée(s)`, factureIds, source: 'devis', existed: false });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
@@ -1276,6 +1335,39 @@ router.post('/:id/generer-pdf', verifyToken, requireRole('expert', 'chef_mission
     })();
     const dateValidite = validiteBase.toISOString().split('T')[0];
 
+    // Group lignes by rubrique → 1 mission per rubrique with summed amount.
+    // Periodicity: pick the most frequent within the rubrique.
+    const rubriqueGroups = new Map();
+    for (const l of lignes) {
+      const key = (l.rubrique && l.rubrique.trim()) || (l.libelle || l.description || 'Autres');
+      if (!rubriqueGroups.has(key)) {
+        rubriqueGroups.set(key, { libelle: key, type: l.section || '', periodicites: {}, total: 0 });
+      }
+      const g = rubriqueGroups.get(key);
+      g.total += parseFloat(l.tarif_ht || l.totalHT || 0);
+      const p = l.periodicite || '';
+      if (p) g.periodicites[p] = (g.periodicites[p] || 0) + 1;
+    }
+    const missions = Array.from(rubriqueGroups.values())
+      .filter(g => g.total > 0.01)
+      .map(g => {
+        const periodicite = Object.entries(g.periodicites).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+        return {
+          libelle: g.libelle,
+          description: '',
+          type: g.type,
+          periodicite,
+          montant_annuel_ht: Math.round(g.total * 100) / 100,
+        };
+      });
+
+    // Parse JSON cabinet fields (atouts, engagements may be string or array depending on DB driver)
+    const parseJson = v => {
+      if (v == null) return null;
+      if (typeof v === 'string') { try { return JSON.parse(v); } catch { return null; } }
+      return v;
+    };
+
     const payload = {
       numero:                    d.numero,
       date_emission:             dateEmission,
@@ -1289,18 +1381,13 @@ router.post('/:id/generer-pdf', verifyToken, requireRole('expert', 'chef_mission
         interlocuteur:           contact,
         fonction:                '',
       },
-      comprehension_besoin:      d.notesInternes || '',
-      prestations_detaillees:    lignes.map(l => ({
-        libelle:                 l.libelle || l.description || '',
-        rubrique:                l.rubrique || '',
-        section:                 l.section || '',
-        periodicite:             l.periodicite || '',
-        tarif_ht:                parseFloat(l.tarif_ht || l.totalHT || 0),
-      })),
+      comprehension_besoin:      d.notesClient || '',
+      missions,
       honoraires_ht_brut:        parseFloat(d.totalHT || 0),
       honoraires_total_ht_annuel: parseFloat(d.total_ht_net || d.totalHT || 0),
       remise_pct:                parseFloat(d.remise_pct || 0),
       cabinet: {
+        nomCabinet:              cabinet.nomCabinet || 'ParFi France',
         adresse:                 cabinet.adresse || '5 Place Langrand',
         codePostal:              cabinet.codePostal || '54400',
         ville:                   cabinet.ville || 'Longwy',
@@ -1308,17 +1395,21 @@ router.post('/:id/generer-pdf', verifyToken, requireRole('expert', 'chef_mission
         siteWeb:                 cabinet.siteWeb || 'www.parfi-france.fr',
         telephone:               cabinet.telephone || '',
         email:                   cabinet.email || 'thierry.alcaraz@parfi-france.fr',
+        description_cabinet:     cabinet.description_cabinet || '',
+        atouts:                  parseJson(cabinet.atouts) || [],
+        engagements:             parseJson(cabinet.engagements) || [],
+        texte_4e_couverture:     cabinet.texte_4e_couverture || '',
       },
       signataire: {
-        nom_complet:             d.cree_par_prenom ? `${d.cree_par_prenom} ${d.cree_par_nom}`.trim() : 'ParFi France',
+        nom_complet:             d.cree_par_prenom ? `${d.cree_par_prenom} ${d.cree_par_nom}`.trim() : (cabinet.nomCabinet || 'ParFi France'),
         fonction:                'Expert-Comptable',
         email:                   cabinet.email || 'thierry.alcaraz@parfi-france.fr',
         telephone:               cabinet.telephone || '',
       },
     };
 
-    // Inject segment template if no custom notes
-    if (!d.notesInternes && d.prospect_segment) {
+    // Fallback: si pas de commentaire client mais un template par segment existe
+    if (!d.notesClient && d.prospect_segment) {
       const [[tpl]] = await pool.query(
         'SELECT texte FROM devis_comprehension_templates WHERE segment = ?',
         [d.prospect_segment]

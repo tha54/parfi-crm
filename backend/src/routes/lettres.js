@@ -390,6 +390,68 @@ async function injecterTachesLDM(ldmId, collaborateur_id, chef_mission_id, reqUs
         }
       }
     }
+  } else if (ldm.devis_id) {
+    // Inject tasks from lignes_devis (LDM generated from devis via genererDepuisDevis)
+    const [devisLignes] = await pool.query(
+      `SELECT * FROM lignes_devis WHERE devisId = ? AND actif = 1 ORDER BY id`,
+      [ldm.devis_id]
+    ).catch(() => [[]]);
+
+    let intervenantMap = null;
+    if (!collaborateur_id) {
+      const [[defCollab]] = await pool.query(
+        `SELECT id FROM utilisateurs WHERE role = 'collaborateur' AND actif = 1 LIMIT 1`
+      ).catch(() => [[null]]);
+      const collabId = defCollab?.id || expertId;
+      const [[alison]] = await pool.query(
+        `SELECT id FROM utilisateurs WHERE actif = 1 AND prenom = 'Alison' LIMIT 1`
+      ).catch(() => [[null]]);
+      const [[gaelle]] = await pool.query(
+        `SELECT id FROM utilisateurs WHERE actif = 1 AND prenom IN ('Gaëlle','Natalie') LIMIT 1`
+      ).catch(() => [[null]]);
+      intervenantMap = {
+        'Expert-comptable':        expertId,
+        'Chef de groupe':          expertId,
+        'Chef de mission':         expertId,
+        'Collaborateur Juridique': alison?.id || collabId,
+        'Collaborateur Social':    gaelle?.id || collabId,
+        'Collaborateur Senior':    collabId,
+        'Collaborateur':           collabId,
+        'Collaborateur Junior':    collabId,
+        'Aide comptable':          collabId,
+      };
+    }
+
+    for (const l of devisLignes) {
+      const userId = collaborateur_id
+        ? Number(collaborateur_id)
+        : (intervenantMap?.[l.intervenant] || expertId);
+
+      const dates = planningDates(l.periodicite, dateDebut, regimeClient);
+      const isRecurrent = dates.length > 1;
+
+      for (const dateEcheance of dates) {
+        try {
+          await pool.query(
+            `INSERT INTO taches
+               (client_id, utilisateur_id, titre, description, date_echeance, source, origine,
+                priorite, budget_minutes, periodicite, assigne_par, type_travail)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [ldm.client_id || null, userId,
+             isRecurrent ? labelPeriodique(l.libelle, l.periodicite, dateEcheance) : l.libelle,
+             `[${l.section || l.rubrique || ''}] ${l.libelle} — ${l.periodicite || ''}`,
+             dateEcheance,
+             'manuelle', 'ldm', 'normale',
+             l.temps_minutes || null,
+             isRecurrent ? null : (l.periodicite || null),
+             reqUserId, 'recurrent']
+          );
+          tachesCreees++;
+        } catch (e) {
+          console.error(`injecterTachesLDM devis: ligne ${l.id} erreur:`, e.message);
+        }
+      }
+    }
   } else if (ldm.repartitionTaches) {
     const userId = collaborateur_id ? Number(collaborateur_id) : expertId;
     let tasks = [];
@@ -580,10 +642,11 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     let factureIds = [];
     let missionIds = [];
     if (statut === 'signee' && prev?.statut !== 'signee') {
-      factureIds = await genererFacturesDepuisLDM(req.params.id).catch(e => {
+      const billingResult = await genererFacturesDepuisLDM(req.params.id).catch(e => {
         console.error('Auto-billing error:', e.message);
-        return [];
+        return { factureIds: [], existed: false };
       });
+      factureIds = billingResult.factureIds || [];
 
       try {
         const [[ldm]] = await pool.query('SELECT * FROM lettres_mission WHERE id = ?', [req.params.id]);
@@ -655,9 +718,24 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
       return res.json({ missingEmail: true, nomContact: ldm.display_nom || '' });
     }
 
+    const acteurNomEnvoyer = `${req.user?.prenom || ''} ${req.user?.nom || ''}`.trim();
+
+    // Expert fast-track: skip soumettre/valider_interne if still in early stages
+    if (['brouillon', 'a_valider'].includes(ldm.statut)) {
+      await pool.query(
+        `UPDATE lettres_mission SET statut = 'validee_interne', updatedAt = NOW() WHERE id = ?`,
+        [req.params.id]
+      );
+      await ldmService.logEvenement(
+        Number(req.params.id), 'modification', req.user?.id, acteurNomEnvoyer,
+        ldm.statut, 'validee_interne',
+        'Envoi direct expert — étapes de validation passées automatiquement', null
+      );
+    }
+
     await ldmService.transitionner(
       Number(req.params.id), 'envoyer', req.user?.role,
-      req.user?.id, `${req.user?.prenom || ''} ${req.user?.nom || ''}`.trim(),
+      req.user?.id, acteurNomEnvoyer,
       { emailOverride: destinataire }
     );
 
@@ -758,8 +836,49 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
       const cabinet = cab || {};
       const nomClient = ldm.display_nom || destinataire;
       const ht = parseFloat(ldm.montantHonorairesHT || ldm.montant_annuel_ht || 0);
+
+      // ── Yousign (si configuré) — sinon fallback email ───────────────
+      const yousign = require('../utils/yousign');
+      if (yousign.isConfigured()) {
+        try {
+          let snap = null;
+          try { snap = ldm.snapshot_client ? JSON.parse(ldm.snapshot_client) : null; } catch {}
+
+          const { requestId, signerId, signingUrl } = await yousign.createSignatureRequest({
+            pdfBuffer,
+            filename:       `${ldm.numero}.pdf`,
+            requestName:    `Lettre de mission ${ldm.numero} — ParFi France`,
+            signer: {
+              email:     destinataire,
+              firstName: snap?.contactPrenom || snap?.nom || nomClient,
+              lastName:  snap?.contactNom  || '',
+            },
+            redirectSuccess: `https://163.172.158.24/lettres-mission/${ldm.id}?signed=1`,
+            expirationDays:  60,
+          });
+
+          await pool.query(
+            `UPDATE lettres_mission SET yousign_request_id = ?, yousign_signer_id = ?, yousign_signing_url = ?, yousign_status = 'pending' WHERE id = ?`,
+            [requestId, signerId, signingUrl, ldm.id]
+          );
+
+          return res.json({
+            message:    `LDM envoyée pour signature électronique via Yousign à ${destinataire}`,
+            statut:     'envoyee',
+            email:      destinataire,
+            yousign:    true,
+            requestId,
+            signingUrl,
+          });
+        } catch (ysErr) {
+          console.error('[envoyer LDM] Yousign erreur:', ysErr.message);
+          // Fallback vers email classique
+        }
+      }
+
+      // ── Fallback : envoi par email avec PDF en pièce jointe ─────────
       const mensuel = (ht / 12).toFixed(2).replace('.', ',');
-      const ttc = (ht * 1.2).toFixed(2).replace('.', ',');
+      const ttc     = (ht * 1.2).toFixed(2).replace('.', ',');
 
       const htmlContent = `
 <!DOCTYPE html><html lang="fr"><body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:0 auto;padding:20px;">
@@ -786,23 +905,27 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
   </p>
 </body></html>`;
 
-      const { sendEmail } = require('../utils/mailer');
-      await sendEmail({
-        to:          destinataire,
-        toName:      nomClient,
-        subject:     `Lettre de mission ${ldm.numero} — ParFi France`,
-        htmlContent,
-        attachments: [{ base64: pdfBuffer.toString('base64'), filename: `${ldm.numero}.pdf` }],
-      });
-
-      return res.json({ message: 'LDM envoyée par email pour signature', statut: 'envoyee', email: destinataire });
-    } catch (emailErr) {
-      console.error('[envoyer LDM] email error:', emailErr.message);
-      return res.json({
-        message: `Statut mis à jour mais envoi email échoué : ${emailErr.message}`,
-        statut: 'envoyee',
-        emailError: emailErr.message,
-      });
+      try {
+        const { sendEmail } = require('../utils/mailer');
+        await sendEmail({
+          to:          destinataire,
+          toName:      nomClient,
+          subject:     `Lettre de mission ${ldm.numero} — ParFi France`,
+          htmlContent,
+          attachments: [{ base64: pdfBuffer.toString('base64'), filename: `${ldm.numero}.pdf` }],
+        });
+        return res.json({ message: 'LDM envoyée par email pour signature', statut: 'envoyee', email: destinataire });
+      } catch (emailErr) {
+        console.error('[envoyer LDM] email error:', emailErr.message);
+        return res.json({
+          message: `Statut mis à jour mais envoi email échoué : ${emailErr.message}`,
+          statut:  'envoyee',
+          emailError: emailErr.message,
+        });
+      }
+    } catch (outerErr) {
+      console.error('[envoyer LDM] erreur:', outerErr.message);
+      return res.json({ message: `Erreur lors de l'envoi : ${outerErr.message}`, statut: 'envoyee' });
     }
   } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -1122,10 +1245,13 @@ router.post('/:id/generer-echeancier', verifyToken, requireRole('expert', 'chef_
   try {
     const [[ldm]] = await pool.query('SELECT id, statut, numero FROM lettres_mission WHERE id = ?', [req.params.id]);
     if (!ldm) return res.status(404).json({ message: 'LDM introuvable' });
-    if (ldm.statut !== 'signee') return res.status(400).json({ message: 'La LDM doit être signée pour générer un échéancier' });
+    if (!['signee', 'active'].includes(ldm.statut)) return res.status(400).json({ message: 'La LDM doit être signée pour générer un échéancier' });
 
-    const factureIds = await genererFacturesDepuisLDM(req.params.id);
-    res.json({ message: `${factureIds.length} facture(s) générée(s)`, factureIds, ldmNumero: ldm.numero });
+    const { factureIds, existed } = await genererFacturesDepuisLDM(req.params.id);
+    const message = existed
+      ? `Échéancier déjà généré : ${factureIds.length} facture(s) liée(s) à la LDM`
+      : `${factureIds.length} facture(s) générée(s)`;
+    res.json({ message, factureIds, ldmNumero: ldm.numero, existed: !!existed });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }

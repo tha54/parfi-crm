@@ -1,17 +1,17 @@
 import { useState } from 'react';
 
-const TYPES_ENTITE = [
+export const TYPES_ENTITE = [
   { value: 'ei',          label: 'EI / Eurl' },
   { value: 'societe',     label: 'Société (SARL, SAS…)' },
   { value: 'association', label: 'Association' },
 ];
-const REGIMES_FISCAUX = [
+export const REGIMES_FISCAUX = [
   { value: 'ir',    label: 'IR (impôt sur le revenu)' },
   { value: 'is',    label: 'IS (impôt sur les sociétés)' },
   { value: 'micro', label: 'Micro-entreprise' },
   { value: 'sci',   label: 'SCI (régime foncier)' },
 ];
-const REGIMES_TVA = [
+export const REGIMES_TVA = [
   { value: 'mensuel',     label: 'Mensuel (12 décl./an)' },
   { value: 'trimestriel', label: 'Trimestriel (4 décl./an)' },
   { value: 'franchise',   label: 'Franchise en base' },
@@ -76,44 +76,19 @@ export default function ChiffrageConfig({ params, setParams, forfaitLines, setFo
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-      {/* Mode temps */}
+      {/* Mode temps — volumétrie uniquement (les régimes sont maintenant en haut de la modale) */}
       <div className="card">
         <div className="card-header">
           <h3 className="card-title" style={{ fontSize: 13 }}>Mission au temps</h3>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Calculé par le moteur</span>
         </div>
         <div className="card-body">
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Type d'entité</label>
-              <select className="form-control" value={params.type_entite}
-                onChange={e => setParam('type_entite', e.target.value)}>
-                {TYPES_ENTITE.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Régime fiscal</label>
-              <select className="form-control" value={params.regime_fiscal}
-                onChange={e => setParam('regime_fiscal', e.target.value)}>
-                {REGIMES_FISCAUX.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Régime TVA</label>
-            <select className="form-control" value={params.regime_tva}
-              onChange={e => setParam('regime_tva', e.target.value)}>
-              {REGIMES_TVA.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-            </select>
-          </div>
-          <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 10 }}>Volumétrie mensuelle</p>
-            <SliderInput label="Factures achat / mois" value={params.factures_achat} onChange={v => setParam('factures_achat', v)} max={500} />
-            <SliderInput label="Factures vente / mois" value={params.factures_vente} onChange={v => setParam('factures_vente', v)} max={200} />
-            <SliderInput label="Lignes de banque / mois" value={params.lignes_banque} onChange={v => setParam('lignes_banque', v)} max={300} />
-            <SliderInput label="Immobilisations" value={params.immobilisations} onChange={v => setParam('immobilisations', v)} max={100} />
-            <SliderInput label="Effectif (salariés)" value={params.effectif} onChange={v => setParam('effectif', v)} max={50} />
-          </div>
+          <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 10 }}>Volumétrie mensuelle</p>
+          <SliderInput label="Factures achat / mois" value={params.factures_achat} onChange={v => setParam('factures_achat', v)} max={500} />
+          <SliderInput label="Factures vente / mois" value={params.factures_vente} onChange={v => setParam('factures_vente', v)} max={200} />
+          <SliderInput label="Lignes de banque / mois" value={params.lignes_banque} onChange={v => setParam('lignes_banque', v)} max={300} />
+          <SliderInput label="Immobilisations" value={params.immobilisations} onChange={v => setParam('immobilisations', v)} max={100} />
+          <SliderInput label="Effectif (salariés)" value={params.effectif} onChange={v => setParam('effectif', v)} max={50} />
         </div>
       </div>
 

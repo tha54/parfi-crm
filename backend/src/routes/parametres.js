@@ -45,10 +45,15 @@ router.get('/', verifyToken, async (req, res) => {
 router.put('/', verifyToken, requireRole('expert'), async (req, res) => {
   const allowed = ['nomCabinet','formeJuridique','siren','numeroOrdre','adresse','codePostal','ville',
     'telephone','email','siteWeb','iban','bic','tauxTva','prefixeLdm','prefixeDevis','prefixeFacture',
-    'prefixeClients','brevoApiKey','emailExpediteur','nomExpediteur','delaiRelanceLdm','logoUrl'];
+    'prefixeClients','brevoApiKey','emailExpediteur','nomExpediteur','delaiRelanceLdm','logoUrl',
+    'description_cabinet','atouts','engagements','texte_4e_couverture'];
+  const jsonCols = new Set(['atouts','engagements']);
   const fields = [], values = [];
   for (const k of allowed) {
-    if (req.body[k] !== undefined) { fields.push(`${k} = ?`); values.push(req.body[k]); }
+    if (req.body[k] !== undefined) {
+      fields.push(`${k} = ?`);
+      values.push(jsonCols.has(k) && req.body[k] != null ? JSON.stringify(req.body[k]) : req.body[k]);
+    }
   }
   if (!fields.length) return res.status(400).json({ message: 'Aucun champ' });
   try {
@@ -60,7 +65,7 @@ router.put('/', verifyToken, requireRole('expert'), async (req, res) => {
       const cols = allowed.filter(k => req.body[k] !== undefined);
       await pool.query(
         `INSERT INTO parametres_cabinet (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
-        cols.map(k => req.body[k])
+        cols.map(k => jsonCols.has(k) && req.body[k] != null ? JSON.stringify(req.body[k]) : req.body[k])
       );
     }
     res.json({ message: 'Paramètres mis à jour' });

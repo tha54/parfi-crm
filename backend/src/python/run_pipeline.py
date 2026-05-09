@@ -25,7 +25,9 @@ def main():
             except Exception:
                 pass
 
-    if payload.get('prestations_detaillees'):
+    # Si missions est déjà fourni (groupé par rubrique côté Node), ne rien recalculer.
+    # Fallback : agrégation par catégorie commerciale si seules les prestations brutes sont passées.
+    if not payload.get('missions') and payload.get('prestations_detaillees'):
         payload['missions'] = aggregate_prestations.aggregate(
             payload['prestations_detaillees']
         )

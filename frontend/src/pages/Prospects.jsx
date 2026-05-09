@@ -34,7 +34,7 @@ function DevisBadge({ p, navigate }) {
       <button
         className="btn btn-ghost btn-sm"
         style={{ fontSize: 11, whiteSpace: 'nowrap' }}
-        onClick={e => { e.stopPropagation(); navigate(`/devis/new?prospect_id=${p.id}&nom=${encodeURIComponent(p.nom)}`); }}
+        onClick={e => { e.stopPropagation(); navigate(`/devis?new=1&prospect_id=${p.id}&nom=${encodeURIComponent(p.nom)}`); }}
       >
         + Créer un devis
       </button>
@@ -46,7 +46,7 @@ function DevisBadge({ p, navigate }) {
     <button
       onClick={e => {
         e.stopPropagation();
-        navigate(isEditable ? `/devis/new?edit=${p.devis_id}` : `/devis/${p.devis_id}`);
+        navigate(isEditable ? `/devis?edit=${p.devis_id}` : `/devis/${p.devis_id}`);
       }}
       style={{ fontSize: 11, fontWeight: 600, color, background: color + '12', border: `1px solid ${color}40`,
                borderRadius: 10, padding: '2px 8px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}

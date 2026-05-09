@@ -1,5 +1,7 @@
 'use strict';
 const pool = require('../config/db');
+const { generateFacturXML, generateFacturePDF } = require('../utils/facturx');
+const { sendEmail } = require('../utils/mailer');
 
 // ─── Numérotation ────────────────────────────────────────────────────────────
 
@@ -187,22 +189,69 @@ async function marquerVu(factureId, acteurId) {
 }
 
 async function emettre(factureId, acteurId) {
-  const [[f]] = await pool.query('SELECT * FROM factures WHERE id = ?', [factureId]);
+  const [[f]] = await pool.query(
+    `SELECT f.*, c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse,
+            COALESCE(c.email_dirigeant, c.portal_email) AS client_email, c.nom AS client_nom2
+     FROM factures f LEFT JOIN clients c ON f.client_id = c.id WHERE f.id = ?`,
+    [factureId]
+  );
   if (!f) throw Object.assign(new Error('Facture introuvable'), { status: 404 });
   if (!['brouillon', 'vu'].includes(f.statut)) throw Object.assign(new Error(`Statut invalide: ${f.statut}`), { status: 400 });
+
   const numeroFiscal = await nextNumeroFiscal();
   const todayStr = fmtDate(new Date());
+
   await pool.query(
     `UPDATE factures SET statut = 'emise', numero_fiscal = ?,
        date_emission_effective = ?, dateEmission = NOW(), dateEcheance = ?
      WHERE id = ?`,
     [numeroFiscal, todayStr, todayStr, factureId]
   );
-  await logEvenement(factureId, 'emission', acteurId,
-    `Facture émise — ${numeroFiscal}`,
-    { metadata: { numero_fiscal: numeroFiscal } }
-  );
-  return { id: factureId, statut: 'emise', numero_fiscal: numeroFiscal };
+  await logEvenement(factureId, 'emission', acteurId, `Facture émise — ${numeroFiscal}`,
+    { metadata: { numero_fiscal: numeroFiscal } });
+
+  // Génération PDF + envoi email
+  let emailStatut = 'non_envoye';
+  if (f.client_email) {
+    try {
+      const [[cab]] = await pool.query('SELECT * FROM parametres_cabinet LIMIT 1').catch(() => [[{}]]);
+      const cabinet = cab || {};
+      const [lignes] = await pool.query('SELECT * FROM lignes_facture WHERE factureId = ? ORDER BY ordre', [factureId]);
+      const fAvecNumero = { ...f, numero_fiscal: numeroFiscal, statut: 'emise' };
+      const xml = generateFacturXML(fAvecNumero, cabinet, lignes);
+      const pdfBuffer = await generateFacturePDF(fAvecNumero, cabinet, lignes, xml);
+
+      const mois = f.mois_facturation
+        ? new Date(f.mois_facturation).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+        : new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+
+      await sendEmail({
+        to: f.client_email,
+        toName: f.client_nom,
+        subject: `Facture ${numeroFiscal} — ${mois}`,
+        htmlContent: `<p>Bonjour,</p>
+<p>Veuillez trouver ci-joint votre facture <strong>${numeroFiscal}</strong> pour la période ${mois}.</p>
+<p>Montant TTC : <strong>${Number(f.totalTTC || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</strong></p>
+<p>Cordialement,<br>${cabinet.nomCabinet || 'ParFi France'}</p>`,
+        attachments: [{ filename: `facture-${numeroFiscal}.pdf`, base64: pdfBuffer.toString('base64') }],
+      });
+
+      emailStatut = 'envoye';
+      await pool.query(`UPDATE factures SET statut = 'envoyee' WHERE id = ?`, [factureId]);
+      await logEvenement(factureId, 'envoi', acteurId, `Facture envoyée par email à ${f.client_email}`);
+    } catch (emailErr) {
+      console.error('Envoi email facture échoué:', emailErr.message);
+      await logEvenement(factureId, 'erreur_envoi', acteurId, `Échec envoi email : ${emailErr.message}`);
+    }
+  }
+
+  return {
+    id: factureId,
+    statut: emailStatut === 'envoye' ? 'envoyee' : 'emise',
+    numero_fiscal: numeroFiscal,
+    email_envoye: emailStatut === 'envoye',
+    email_destinataire: f.client_email || null,
+  };
 }
 
 async function marquerPayee(factureId, acteurId) {

@@ -2704,7 +2704,7 @@ function TabDevisLdm({ devis, ldm, clientId }) {
           <span className="card-title">Devis ({devis.length})</span>
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => navigate(`/devis/new?client_id=${clientId}`)}
+            onClick={() => navigate(`/devis?new=1&client_id=${clientId}`)}
           >
             + Nouveau devis
           </button>
@@ -3205,7 +3205,7 @@ export default function ClientCockpit() {
             <button
               className="btn btn-primary btn-sm"
               style={{ fontSize: 12 }}
-              onClick={() => navigate(`/devis/new?client_id=${clientId}`)}
+              onClick={() => navigate(`/devis?new=1&client_id=${clientId}`)}
             >
               📄 Devis
             </button>

@@ -8,10 +8,21 @@ async function nextFactureNumero() {
   return `FAC-${year}-${String(seq).padStart(4,'0')}`;
 }
 
-// Génère les factures automatiquement depuis une LDM signée
-async function genererFacturesDepuisLDM(ldmId) {
+// Génère les factures automatiquement depuis une LDM signée.
+// Idempotent: si des factures existent déjà pour cette LDM, renvoie les ids
+// existants sans en créer de nouvelles (sauf options.force === true).
+async function genererFacturesDepuisLDM(ldmId, options = {}) {
   const [[ldm]] = await pool.query('SELECT * FROM lettres_mission WHERE id=?', [ldmId]);
-  if (!ldm) return [];
+  if (!ldm) return { factureIds: [], existed: false };
+
+  if (!options.force) {
+    const [existing] = await pool.query(
+      'SELECT id FROM factures WHERE lettre_mission_id = ? ORDER BY id', [ldmId]
+    );
+    if (existing.length > 0) {
+      return { factureIds: existing.map(r => r.id), existed: true };
+    }
+  }
 
   const montantHT = parseFloat(ldm.montantHonorairesHT || 0);
   const tauxTVA = 20;
@@ -43,11 +54,11 @@ async function genererFacturesDepuisLDM(ldmId) {
     const numero = await nextFactureNumero();
 
     const [r] = await pool.query(
-      `INSERT INTO factures (numero, contactId, client_id, type, statut,
+      `INSERT INTO factures (numero, contactId, client_id, devisId, lettre_mission_id, type, statut,
         dateEmission, dateEcheance, totalHT, tauxTVA, totalTVA, totalTTC,
         estRecurrente, periodeRecurrence, intervenantId, notesInternes)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [numero, ldm.contactId, ldm.client_id, 'recurrence', 'brouillon',
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [numero, ldm.contactId, ldm.client_id, ldm.devis_id || null, ldmId, 'recurrence', 'brouillon',
        emission, echeance, montantPeriode, tauxTVA, tvaPeriode, ttcPeriode,
        periodicite !== 'unique' ? 1 : 0, periodicite !== 'unique' ? periodicite : null,
        ldm.intervenantId || null,
@@ -84,7 +95,7 @@ async function genererFacturesDepuisLDM(ldmId) {
     });
   }
 
-  return factureIds;
+  return { factureIds, existed: false };
 }
 
 module.exports = { genererFacturesDepuisLDM, nextFactureNumero };

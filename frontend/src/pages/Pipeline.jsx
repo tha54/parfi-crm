@@ -439,7 +439,7 @@ function CardActionModal({ opp, onClose, onEditOpp, onEditProspect, navigate }) 
     setDuplicating(true); setDupErr('');
     try {
       const { data } = await api.post(`/devis/${opp.devis_id}/dupliquer`);
-      navigate(`/devis/new?edit=${data.id}`);
+      navigate(`/devis?edit=${data.id}`);
     } catch (e) {
       setDupErr(e.response?.data?.message || 'Erreur lors de la duplication');
       setDuplicating(false);
@@ -480,15 +480,16 @@ function CardActionModal({ opp, onClose, onEditOpp, onEditProspect, navigate }) 
         () => { onClose(); navigate(`/devis/${opp.devis_id}`); },
         { color: '#0891b2', border: '#bae6fd', bg: '#f0f9ff', hover: '#e0f2fe' }));
       actions.push(btn('✏️', 'Modifier le devis', opp.devis_numero || '',
-        () => { onClose(); navigate(`/devis/new?edit=${opp.devis_id}`); },
+        () => { onClose(); navigate(`/devis?edit=${opp.devis_id}`); },
         { color: '#d97706', border: '#fde68a', bg: '#fffbeb', hover: '#fef3c7' }));
     } else {
       const params = new URLSearchParams();
+      params.set('new', '1');
       params.set('opp_id', opp.id);
       if (opp.prospect_id) params.set('prospect_id', opp.prospect_id);
       if (opp.contactNom) params.set('nom', opp.contactNom);
       actions.push(btn('📄', 'Créer le devis', 'Aucun devis lié à cette opportunité',
-        () => { onClose(); navigate(`/devis/new?${params.toString()}`); },
+        () => { onClose(); navigate(`/devis?${params.toString()}`); },
         { color: '#8b5cf6', border: '#c4b5fd', bg: '#faf5ff', hover: '#f0e6ff' }));
     }
   } else if (statut === 'negociation') {
@@ -498,7 +499,7 @@ function CardActionModal({ opp, onClose, onEditOpp, onEditProspect, navigate }) 
         { color: '#0891b2', border: '#bae6fd', bg: '#f0f9ff', hover: '#e0f2fe' }));
       if (opp.devis_statut === 'brouillon') {
         actions.push(btn('✏️', 'Modifier le devis', opp.devis_numero || '',
-          () => { onClose(); navigate(`/devis/new?edit=${opp.devis_id}`); },
+          () => { onClose(); navigate(`/devis?edit=${opp.devis_id}`); },
           { color: '#d97706', border: '#fde68a', bg: '#fffbeb', hover: '#fef3c7' }));
       } else {
         actions.push(btn(
@@ -649,7 +650,7 @@ function KanbanCard({ opp, isDragging, onEdit, onDelete, onDragStart, onDragEnd,
       {(opp.devis_numero || opp.ldm_numero) && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
           {opp.devis_numero && (
-            <a href={opp.devis_statut === 'brouillon' ? `/devis/new?edit=${opp.devis_id}` : `/devis/${opp.devis_id}`}
+            <a href={opp.devis_statut === 'brouillon' ? `/devis?edit=${opp.devis_id}` : `/devis/${opp.devis_id}`}
                onClick={e => e.stopPropagation()}
                style={{ fontSize: 11, fontWeight: 600, color: '#8b5cf6', background: '#8b5cf610',
                         border: '1px solid #8b5cf640', borderRadius: 10, padding: '2px 8px',
@@ -875,10 +876,11 @@ export default function Pipeline() {
   /* "Créer un devis" from pipeline card */
   const handleCreateDevis = (opp) => {
     const params = new URLSearchParams();
+    params.set('new', '1');
     params.set('opp_id', opp.id);
     if (opp.prospect_id) params.set('prospect_id', opp.prospect_id);
     if (opp.contactNom) params.set('nom', opp.contactNom);
-    navigate(`/devis/new?${params.toString()}`);
+    navigate(`/devis?${params.toString()}`);
   };
 
   /* Drag handlers */

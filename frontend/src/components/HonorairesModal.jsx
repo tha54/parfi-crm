@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
-import ChiffrageConfig, { DEFAULT_PARAMS } from './ChiffrageConfig';
+import ChiffrageConfig, { DEFAULT_PARAMS, TYPES_ENTITE, REGIMES_FISCAUX, REGIMES_TVA } from './ChiffrageConfig';
 
 const fmt = v => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v || 0);
 
@@ -103,7 +103,7 @@ function SectionHeader({ label, badge, children }) {
   );
 }
 
-export default function HonorairesModal({ type = 'devis', initialEntity = null, initialData = null, onSaved, onClose }) {
+export default function HonorairesModal({ type = 'devis', initialEntity = null, initialOpportuniteId = null, initialData = null, onSaved, onClose }) {
   const [clients, setClients]     = useState([]);
   const [prospects, setProspects] = useState([]);
   const [entity, setEntity]       = useState(initialEntity);
@@ -112,6 +112,7 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
     initialData?.dateValidite ? initialData.dateValidite.substring(0, 10) : ''
   );
   const [notesInternes, setNotesInternes] = useState(initialData?.notesInternes || '');
+  const [notesClient, setNotesClient]     = useState(initialData?.notesClient || '');
 
   // Lignes libres (mode rapide)
   const [lignesRapides, setLignesRapides] = useState([]);
@@ -131,6 +132,7 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
 
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState('');
+  const [savedId, setSavedId] = useState(initialData?.id || null);
 
   useEffect(() => {
     Promise.all([
@@ -141,19 +143,59 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
 
   useEffect(() => {
     if (!initialData) return;
-    if (initialData.lignes) {
-      const rapides = (initialData.lignes || []).filter(l => l.mode_saisie === 'rapide').map(l => ({
-        libelle: l.description || l.libelle || '', chapitre: l.chapitre || 'comptable_fiscal',
-        montant_ht: String(l.tarif_ht || l.totalHT || ''), periodicite: l.periodicite || 'Annuel',
-      }));
-      setLignesRapides(rapides);
+
+    // Restaure les paramètres de chiffrage saisis lors de la création
+    setParams(prev => ({
+      ...prev,
+      type_entite:     initialData.type_entite     || prev.type_entite,
+      regime_fiscal:   initialData.regime_fiscal   || prev.regime_fiscal,
+      regime_tva:      initialData.regime_tva      || prev.regime_tva,
+      factures_achat:  initialData.factures_achat  ?? prev.factures_achat,
+      factures_vente:  initialData.factures_vente  ?? prev.factures_vente,
+      lignes_banque:   initialData.lignes_banque   ?? prev.lignes_banque,
+      immobilisations: initialData.immobilisations ?? prev.immobilisations,
+      effectif:        initialData.effectif        ?? prev.effectif,
+    }));
+
+    const lignes = initialData.lignes || [];
+    const rapides = lignes.filter(l => l.mode_saisie === 'rapide').map(l => ({
+      libelle: l.description || l.libelle || '',
+      chapitre: l.chapitre || 'comptable_fiscal',
+      montant_ht: String(l.tarif_ht || l.totalHT || ''),
+      periodicite: l.periodicite || 'Annuel',
+    }));
+    setLignesRapides(rapides);
+
+    const chiffres = lignes.filter(l => l.mode_saisie === 'chiffre');
+    if (chiffres.length > 0) {
+      setCalcResult({
+        lignes: chiffres.map(l => ({
+          libelle:       l.description || l.libelle || '',
+          rubrique:      l.rubrique || '',
+          section:       l.section || '',
+          intervenant:   l.intervenant || null,
+          periodicite:   l.periodicite || 'Annuel',
+          temps_minutes: l.temps_minutes || 0,
+          tarif_ht:      parseFloat(l.tarif_ht || l.totalHT || 0),
+          mode_suivi:    l.mode_suivi || 'temps',
+        })),
+      });
+      setActivesChiffre(Object.fromEntries(chiffres.map((_, i) => [i, true])));
+    } else {
+      setCalcResult(null);
+      setActivesChiffre({});
     }
+
     if (initialData.chapitres) {
       const acc = {};
       initialData.chapitres.forEach(c => { acc[c.chapitre] = String(c.montant_accepte_ht); });
       setMontantsAcceptes(acc);
     }
-  }, [initialData]);
+
+    if (initialData.notesClient !== undefined) setNotesClient(initialData.notesClient || '');
+    if (initialData.notesInternes !== undefined) setNotesInternes(initialData.notesInternes || '');
+    setSavedId(initialData.id || null);
+  }, [initialData?.id]);
 
   const doCalcul = useCallback(async (p, fl) => {
     setCalcLoading(true); setCalcError('');
@@ -216,11 +258,7 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
     setNewLigne({ libelle: '', chapitre: 'comptable_fiscal', montant_ht: '', periodicite: 'Annuel' });
   };
 
-  const handleSave = async (statut = 'brouillon') => {
-    if (!entity) { setErr('Sélectionner un client ou prospect'); return; }
-    if (!titre.trim()) { setErr('Titre requis'); return; }
-    setSaving(statut); setErr('');
-
+  const buildPayload = () => {
     const chapitres_remise = {};
     for (const [ch, th] of Object.entries(chapTotauxTh)) {
       if (th > 0) {
@@ -230,52 +268,88 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
         };
       }
     }
-
-    const lignes_rapides = lignesRapides
-      .filter(l => l.libelle && parseFloat(l.montant_ht) > 0)
-      .map(l => ({ libelle: l.libelle, chapitre: l.chapitre, montant_ht: parseFloat(l.montant_ht), periodicite: l.periodicite }));
-
-    const chiffreActif = calcResult !== null && lignesChiffreActives.length > 0;
-
-    const payload = {
+    // Flatten everything into one lignes_rapides array so the backend persists exactly
+    // what the user sees (deselected chiffrage lines must not come back via the engine).
+    const lignes_rapides = [
+      ...lignesRapides
+        .filter(l => l.libelle && parseFloat(l.montant_ht) > 0)
+        .map(l => ({
+          libelle: l.libelle, chapitre: l.chapitre,
+          montant_ht: parseFloat(l.montant_ht), periodicite: l.periodicite,
+          mode_saisie: 'rapide', mode_suivi: 'forfait',
+        })),
+      ...lignesChiffreActives.map(l => ({
+        libelle: l.libelle, rubrique: l.rubrique, section: l.section,
+        intervenant: l.intervenant, periodicite: l.periodicite,
+        temps_minutes: l.temps_minutes, montant_ht: l.tarif_ht,
+        chapitre: sectionToChapitre(l.section),
+        mode_saisie: 'chiffre', mode_suivi: l.mode_suivi || 'temps',
+      })),
+    ];
+    return {
       titre,
       ...(entity.type === 'client' ? { client_id: entity.id } : { prospect_id: entity.id }),
+      ...(initialOpportuniteId ? { opportunite_id: initialOpportuniteId } : {}),
       dateValidite: dateValidite || undefined,
       notesInternes: notesInternes || undefined,
+      notesClient: notesClient || undefined,
       lignes_rapides,
-      rubriques_forfait: chiffreActif ? forfaitLines : [],
-      run_engine: chiffreActif,
+      rubriques_forfait: [],
+      run_engine: false,
       chapitres_remise: Object.keys(chapitres_remise).length ? chapitres_remise : null,
       ...params,
     };
+  };
 
-    try {
-      let id;
-      if (type === 'devis') {
-        if (initialData?.id) {
-          await api.put(`/devis/${initialData.id}`, payload);
-          id = initialData.id;
-        } else {
-          const { data } = await api.post('/devis', payload);
-          id = data.id;
-        }
+  const persist = async (payload) => {
+    let id;
+    if (type === 'devis') {
+      if (savedId) {
+        await api.put(`/devis/${savedId}`, payload);
+        id = savedId;
       } else {
-        const ldmPayload = {
-          ...payload,
-          objetMission: titre,
-          montantHonorairesHT: totalAccepte,
-        };
-        if (initialData?.id) {
-          await api.put(`/lettres-mission/${initialData.id}`, ldmPayload);
-          id = initialData.id;
-        } else {
-          const { data } = await api.post('/lettres-mission', ldmPayload);
-          id = data.id;
-        }
+        const { data } = await api.post('/devis', payload);
+        id = data.id;
       }
+    } else {
+      const ldmPayload = { ...payload, objetMission: titre, montantHonorairesHT: totalAccepte };
+      if (savedId) {
+        await api.put(`/lettres-mission/${savedId}`, ldmPayload);
+        id = savedId;
+      } else {
+        const { data } = await api.post('/lettres-mission', ldmPayload);
+        id = data.id;
+      }
+    }
+    setSavedId(id);
+    return id;
+  };
+
+  const handleSave = async (statut = 'brouillon') => {
+    if (!entity) { setErr('Sélectionner un client ou prospect'); return; }
+    if (!titre.trim()) { setErr('Titre requis'); return; }
+    setSaving(statut); setErr('');
+    try {
+      const id = await persist(buildPayload());
       onSaved(id);
     } catch (e) {
       setErr(e.response?.data?.message || 'Erreur lors de la sauvegarde');
+    } finally { setSaving(false); }
+  };
+
+  const handleVisualiser = async () => {
+    if (!entity) { setErr('Sélectionner un client ou prospect'); return; }
+    if (!titre.trim()) { setErr('Titre requis'); return; }
+    setSaving('visualiser'); setErr('');
+    try {
+      const id = await persist(buildPayload());
+      const token = localStorage.getItem('parfi_token');
+      const url = type === 'devis'
+        ? `/api/devis/${id}/html?token=${token}`
+        : `/api/lettres-mission/${id}/html?token=${token}`;
+      window.open(url, '_blank');
+    } catch (e) {
+      setErr(e.response?.data?.message || 'Erreur lors de la visualisation');
     } finally { setSaving(false); }
   };
 
@@ -299,7 +373,7 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
           {err && <div className="alert alert-error" style={{ marginBottom: 12, fontSize: 13 }}>{err}</div>}
 
           {/* Identity */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Client / Prospect *</label>
               <ClientSearch clients={clients} prospects={prospects} value={entity}
@@ -309,6 +383,41 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
               <label className="form-label">Titre *</label>
               <input className="form-control" value={titre}
                 onChange={e => setTitre(e.target.value)} placeholder="Ex. Mission comptable 2025" />
+            </div>
+          </div>
+
+          {/* Régimes — s'appliquent aux deux modes (lignes libres + chiffrage) */}
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-secondary)' }}>
+                Caractéristiques de l'entité
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                Appliqué aux lignes libres et au chiffrage
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Type d'entité</label>
+                <select className="form-control" value={params.type_entite}
+                  onChange={e => handleParamsChange({ ...params, type_entite: e.target.value })}>
+                  {TYPES_ENTITE.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Régime fiscal</label>
+                <select className="form-control" value={params.regime_fiscal}
+                  onChange={e => handleParamsChange({ ...params, regime_fiscal: e.target.value })}>
+                  {REGIMES_FISCAUX.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Régime TVA</label>
+                <select className="form-control" value={params.regime_tva}
+                  onChange={e => handleParamsChange({ ...params, regime_tva: e.target.value })}>
+                  {REGIMES_TVA.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -485,12 +594,17 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
           {/* Optional fields */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
             {type === 'devis' && (
-              <div className="form-group" style={{ margin: 0 }}>
+              <div className="form-group" style={{ margin: 0, gridColumn: '1 / -1' }}>
                 <label className="form-label">Date de validité</label>
                 <input type="date" className="form-control" value={dateValidite} onChange={e => setDateValidite(e.target.value)} />
               </div>
             )}
-            <div className="form-group" style={{ margin: 0, gridColumn: type === 'devis' ? '' : '1 / -1' }}>
+            <div className="form-group" style={{ margin: 0, gridColumn: '1 / -1' }}>
+              <label className="form-label">Commentaire spécifique au devis (visible client, page 2 du PDF)</label>
+              <textarea className="form-control" rows={3} value={notesClient} onChange={e => setNotesClient(e.target.value)}
+                placeholder="Texte qui remplace la « Compréhension du besoin » par défaut. Plusieurs paragraphes : sépare-les par une ligne vide." />
+            </div>
+            <div className="form-group" style={{ margin: 0, gridColumn: '1 / -1' }}>
               <label className="form-label">Notes internes</label>
               <textarea className="form-control" rows={2} value={notesInternes} onChange={e => setNotesInternes(e.target.value)} placeholder="Notes internes (non visibles du client)" />
             </div>
@@ -499,14 +613,22 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
           {/* Footer */}
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <button className="btn btn-ghost" onClick={onClose}>Annuler</button>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-ghost" onClick={() => handleSave('brouillon')}
-                disabled={!!saving || totalTheorique === 0}>
-                {saving === 'brouillon' ? 'Enregistrement…' : '💾 Brouillon'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>
+                {savedId ? 'Enregistre les modifications' : 'Crée le brouillon — l’envoi se fait depuis la fiche'}
+              </span>
+              <button className="btn btn-ghost" onClick={handleVisualiser}
+                disabled={!!saving || totalTheorique === 0}
+                title="Sauvegarde en brouillon et ouvre l'aperçu dans un nouvel onglet">
+                {saving === 'visualiser' ? 'Ouverture…' : '👁 Visualiser'}
               </button>
-              <button className="btn btn-primary" onClick={() => handleSave('envoye')}
+              <button className="btn btn-primary" onClick={() => handleSave('brouillon')}
                 disabled={!!saving || totalTheorique === 0}>
-                {saving === 'envoye' ? 'Création…' : type === 'devis' ? '📄 Créer et envoyer' : '📋 Créer la LDM'}
+                {saving === 'brouillon'
+                  ? (savedId ? 'Enregistrement…' : 'Création…')
+                  : savedId
+                    ? '💾 Enregistrer'
+                    : (type === 'devis' ? '💾 Créer le brouillon' : '💾 Créer la LDM')}
               </button>
             </div>
           </div>

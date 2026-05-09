@@ -43,6 +43,42 @@ const TYPES_MISSION = {
   social_paie: 'Social / Paie', conseil: 'Conseil', juridique: 'Juridique', autre: 'Autre',
 };
 
+/** Bandeau "Prochaine étape" — guide le workflow LDM. */
+function NextStepCard({ title, subtitle, description, primary, secondaries = [], color = 'var(--accent)' }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 18,
+      padding: '16px 20px', marginBottom: 20,
+      borderRadius: 10, border: `1px solid ${color}40`,
+      background: `${color}0d`, borderLeft: `4px solid ${color}`,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color, padding: '2px 8px', background: `${color}1a`, borderRadius: 10 }}>
+            {subtitle}
+          </span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+        </div>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{description}</p>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {secondaries.map((b, i) => (
+          <button key={i} className="btn btn-ghost btn-sm" onClick={b.onClick} disabled={b.disabled}
+            style={b.color ? { borderColor: b.color, color: b.color } : undefined}>
+            {b.label}
+          </button>
+        ))}
+        {primary && (
+          <button className="btn btn-primary" onClick={primary.onClick} disabled={primary.disabled} title={primary.title}
+            style={{ background: primary.color || color, borderColor: primary.color || color }}>
+            {primary.label}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function printLDM(ldm, mandats) {
   const nom     = ldm.client_nom || '—';
   const today   = new Date().toLocaleDateString('fr-FR');
@@ -229,6 +265,9 @@ export default function LDMDetail() {
   const [resilierModal, setResilierModal] = useState(false);
   const [resilierForm, setResilierForm] = useState({ motif: '', dateResiliation: '' });
   const [annulerModal, setAnnulerModal] = useState(false);
+  const [editMission, setEditMission] = useState(false);
+  const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '' });
+  const [savingMission, setSavingMission] = useState(false);
 
   const isExpert = user?.role === 'expert';
   const canPrepare = ['expert', 'chef_mission'].includes(user?.role);
@@ -454,6 +493,31 @@ export default function LDMDetail() {
     } finally { setSigning(false); }
   };
 
+  const openEditMission = () => {
+    setMissionForm({
+      objetMission: ldm.objetMission || '',
+      montantHonorairesHT: ldm.montantHonorairesHT || '',
+      dateDebut: ldm.dateDebut ? ldm.dateDebut.slice(0, 10) : '',
+    });
+    setEditMission(true);
+  };
+
+  const saveMission = async () => {
+    setSavingMission(true); setMsg(null);
+    try {
+      await api.put(`/lettres-mission/${id}`, {
+        objetMission: missionForm.objetMission || null,
+        montantHonorairesHT: Number(missionForm.montantHonorairesHT) || 0,
+        dateDebut: missionForm.dateDebut || null,
+      });
+      setEditMission(false);
+      setMsg({ type: 'ok', text: '✓ Mission mise à jour' });
+      await load();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur mise à jour mission' });
+    } finally { setSavingMission(false); }
+  };
+
   const saveRecueilBesoin = async () => {
     setSavingRecueil(true); setMsg(null);
     try {
@@ -511,59 +575,6 @@ export default function LDMDetail() {
               {generatingPdf ? '⏳' : '↺ PDF'}
             </button>
           )}
-          {/* Soumettre pour validation (brouillon → a_valider) */}
-          {['brouillon'].includes(ldm.statut) && (
-            <button className="btn btn-primary" onClick={soumettreLDM} disabled={signing}
-              style={{ background: '#d97706' }}>
-              {signing ? '…' : '📨 Soumettre'}
-            </button>
-          )}
-          {/* Valider en interne (a_valider → validee_interne, expert only) */}
-          {ldm.statut === 'a_valider' && isExpert && (
-            <button className="btn btn-primary" onClick={validerInterne} disabled={signing}
-              style={{ background: '#2563eb' }}>
-              {signing ? '…' : '✅ Valider'}
-            </button>
-          )}
-          {/* Rollback (a_valider / validee_interne → brouillon) */}
-          {['a_valider','validee_interne'].includes(ldm.statut) && canPrepare && (
-            <button className="btn btn-ghost btn-sm" onClick={rollbackLDM} disabled={signing}
-              style={{ fontSize: 12 }}>
-              ↩ Renvoyer en brouillon
-            </button>
-          )}
-          {/* Envoyer au client (validee_interne → envoyee) */}
-          {ldm.statut === 'validee_interne' && isExpert && (
-            <button className="btn btn-primary" onClick={() => envoyerLDM()} disabled={signing}
-              style={{ background: '#2563eb' }}>
-              {signing ? 'Envoi…' : '📤 Envoyer pour signature'}
-            </button>
-          )}
-          {/* Signer — disponible depuis n'importe quel statut actif (cascade auto côté serveur) */}
-          {['brouillon','a_valider','validee_interne','envoyee'].includes(ldm.statut) && canPrepare && (
-            <button className="btn btn-primary" onClick={openSignModal} disabled={signing}
-              style={{ background: '#0f1f4b' }}>
-              {signing ? 'Signature…' : '✍️ Signer la LDM'}
-            </button>
-          )}
-          {/* Active : actions post-signature */}
-          {ldm.statut === 'active' && canPrepare && (
-            <>
-              <button className="btn btn-ghost btn-sm" onClick={() => setInjecterModal(true)} disabled={signing}>
-                {signing ? '…' : '📋 Tâches'}
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={genererEcheancier} disabled={generatingEcheancier}>
-                {generatingEcheancier ? '…' : '💳 Échéancier'}
-              </button>
-            </>
-          )}
-          {/* Expert : résilier (depuis active) */}
-          {isExpert && ldm.statut === 'active' && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setResilierModal(true)}
-              style={{ borderColor: '#dc2626', color: '#dc2626' }}>
-              Résilier
-            </button>
-          )}
           {/* Expert : annuler (depuis brouillon, a_valider, validee_interne, envoyée) */}
           {isExpert && ['brouillon','a_valider','validee_interne','envoyee'].includes(ldm.statut) && (
             <button className="btn btn-ghost btn-sm" onClick={() => setAnnulerModal(true)}
@@ -588,24 +599,112 @@ export default function LDMDetail() {
           </div>
         )}
 
-        {/* Bannière contextuelle quand on arrive depuis l'acceptation du devis */}
-        {fromDevis && ['brouillon','a_valider','validee_interne'].includes(ldm?.statut) && isExpert && (
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-            <div>
-              <div style={{ fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>✓ Devis accepté — Lettre de mission créée</div>
-              <div style={{ fontSize: 13, color: '#3b82f6', marginTop: 3 }}>
-                La lettre de mission <strong>{ldm.numero}</strong> est prête. Affectez un collaborateur et signez-la pour démarrer la mission.
-              </div>
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={openSignModal}
-              disabled={signing}
-              style={{ background: '#0f1f4b', whiteSpace: 'nowrap', flexShrink: 0 }}
-            >
-              {signing ? 'Signature…' : '✍️ Signer la LDM'}
-            </button>
-          </div>
+        {/* Bandeau "Prochaine étape" — guide le workflow LDM */}
+        {ldm.statut === 'brouillon' && isExpert && (
+          <NextStepCard
+            subtitle="Brouillon"
+            title="LDM prête à envoyer au client"
+            description="La LDM a été générée depuis le devis. Vérifiez les informations, modifiez si nécessaire, puis envoyez-la au client pour signature."
+            primary={{
+              label: signing ? 'Envoi…' : '📤 Envoyer pour signature',
+              onClick: () => envoyerLDM(),
+              disabled: signing,
+              color: '#2563eb',
+            }}
+            color="#2563eb"
+          />
+        )}
+        {ldm.statut === 'brouillon' && !isExpert && canPrepare && (
+          <NextStepCard
+            subtitle="Étape 1 / 4"
+            title="Brouillon — recueil du besoin à finaliser"
+            description={recueilOk
+              ? "Le recueil du besoin est complet. Soumets la LDM pour validation par l'expert-comptable."
+              : "Renseigne au minimum l'activité et les enjeux dans le recueil du besoin avant de soumettre pour validation."}
+            primary={{
+              label: signing ? '…' : '📨 Soumettre pour validation',
+              onClick: soumettreLDM,
+              disabled: signing || !recueilOk,
+              title: recueilOk ? '' : 'Recueil incomplet — remplir Activité + Enjeux',
+              color: '#d97706',
+            }}
+            color="#6b7c93"
+          />
+        )}
+        {ldm.statut === 'a_valider' && (
+          <NextStepCard
+            subtitle="Étape 2 / 4"
+            title={isExpert ? "À valider en interne" : "En attente de validation expert"}
+            description={isExpert
+              ? "L'expert-comptable doit valider cette LDM avant qu'elle puisse être envoyée au client."
+              : "L'expert-comptable doit valider cette LDM. En attendant, tu peux toujours la modifier en la renvoyant en brouillon."}
+            primary={isExpert ? {
+              label: signing ? '…' : '✅ Valider en interne',
+              onClick: validerInterne,
+              disabled: signing,
+              color: '#2563eb',
+            } : null}
+            secondaries={canPrepare ? [
+              { label: '↩ Renvoyer en brouillon', onClick: rollbackLDM, disabled: signing },
+            ] : []}
+            color="#d97706"
+          />
+        )}
+        {ldm.statut === 'validee_interne' && (
+          <NextStepCard
+            subtitle="Étape 3 / 4"
+            title="Validée — prête à envoyer au client"
+            description="La LDM a été validée en interne. Cliquer « Envoyer pour signature » envoie automatiquement le document par email au client."
+            primary={{
+              label: signing ? 'Envoi…' : '📤 Envoyer pour signature',
+              onClick: () => envoyerLDM(),
+              disabled: signing,
+              color: '#2563eb',
+            }}
+            secondaries={canPrepare ? [
+              { label: '↩ Renvoyer en brouillon', onClick: rollbackLDM, disabled: signing },
+            ] : []}
+            color="#2563eb"
+          />
+        )}
+        {ldm.statut === 'envoyee' && canPrepare && (
+          <NextStepCard
+            subtitle="Étape 4 / 4"
+            title={ldm.yousign_request_id
+              ? '✍️ Signature électronique en cours (Yousign)'
+              : 'Envoyée — en attente de signature client'}
+            description={ldm.yousign_request_id
+              ? "La LDM a été envoyée via Yousign pour signature électronique. La mission s'activera automatiquement dès que le client aura signé. Vous recevrez une notification."
+              : "La LDM a été envoyée par email au client. Quand tu reçois la confirmation de signature, marque-la comme signée pour activer la mission."}
+            primary={ldm.yousign_request_id ? null : {
+              label: signing ? 'Signature…' : '✍️ Marquer comme signée',
+              onClick: openSignModal,
+              disabled: signing,
+              color: '#0f1f4b',
+            }}
+            secondaries={[
+              ...(ldm.yousign_request_id ? [] : [{ label: signing ? '…' : '↻ Renvoyer par email', onClick: () => envoyerLDM(), disabled: signing }]),
+            ]}
+            color="#f59e0b"
+          />
+        )}
+        {ldm.statut === 'active' && canPrepare && (
+          <NextStepCard
+            subtitle="Mission active"
+            title="LDM active — mission en cours"
+            description="La lettre de mission est signée et active. Génère l'échéancier de factures pour automatiser la facturation, ou affecte les tâches aux collaborateurs."
+            primary={{
+              label: generatingEcheancier ? '…' : '💳 Générer échéancier de factures',
+              onClick: genererEcheancier,
+              disabled: generatingEcheancier,
+              color: '#059669',
+            }}
+            secondaries={[
+              { label: '📋 Affecter les tâches', onClick: () => setInjecterModal(true), disabled: signing },
+              ...(isExpert ? [{ label: 'Résilier', onClick: () => setResilierModal(true), color: '#dc2626' }] : []),
+            ]}
+            color="#059669"
+          />
         )}
 
         {/* Pipeline statut visuel */}
@@ -786,26 +885,67 @@ export default function LDMDetail() {
 
             {/* Mission */}
             <div className="card">
-              <div className="card-header"><span className="card-title">Objet de la mission</span></div>
+              <div className="card-header">
+                <span className="card-title">Objet de la mission</span>
+                {canEditRecueil && canPrepare && !editMission && (
+                  <button className="btn btn-ghost btn-sm" onClick={openEditMission} style={{ fontSize: 12 }}>
+                    ✏️ Modifier
+                  </button>
+                )}
+              </div>
               <div className="card-body">
-                <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Type</div>
-                    <div style={{ fontWeight: 600 }}>{TYPES_MISSION[ldm.typeMission] || ldm.typeMission}</div>
+                {editMission ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontSize: 12 }}>Honoraires HT annuels (€)</label>
+                        <input type="number" className="form-control" min="0" step="100"
+                          value={missionForm.montantHonorairesHT}
+                          onChange={e => setMissionForm(f => ({ ...f, montantHonorairesHT: e.target.value }))} />
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontSize: 12 }}>Date de début</label>
+                        <input type="date" className="form-control"
+                          value={missionForm.dateDebut}
+                          onChange={e => setMissionForm(f => ({ ...f, dateDebut: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: 12 }}>Objet de la mission</label>
+                      <textarea className="form-control" rows={3} style={{ resize: 'vertical', fontSize: 13 }}
+                        value={missionForm.objetMission}
+                        onChange={e => setMissionForm(f => ({ ...f, objetMission: e.target.value }))}
+                        placeholder="Décrivez l'objet de la mission…" />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditMission(false)}>Annuler</button>
+                      <button className="btn btn-primary btn-sm" onClick={saveMission} disabled={savingMission}>
+                        {savingMission ? 'Sauvegarde…' : '✓ Enregistrer'}
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Honoraires HT</div>
-                    <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{fmt(ldm.montantHonorairesHT)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Mensuel TTC</div>
-                    <div style={{ fontWeight: 600, color: 'var(--accent-hover)' }}>{fmt(Number(ldm.montantHonorairesHT) * 1.20 / 12)}</div>
-                  </div>
-                </div>
-                {ldm.objetMission && (
-                  <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>
-                    {ldm.objetMission}
-                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Type</div>
+                        <div style={{ fontWeight: 600 }}>{TYPES_MISSION[ldm.typeMission] || ldm.typeMission}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Honoraires HT</div>
+                        <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{fmt(ldm.montantHonorairesHT)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Mensuel TTC</div>
+                        <div style={{ fontWeight: 600, color: 'var(--accent-hover)' }}>{fmt(Number(ldm.montantHonorairesHT) * 1.20 / 12)}</div>
+                      </div>
+                    </div>
+                    {ldm.objetMission && (
+                      <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>
+                        {ldm.objetMission}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

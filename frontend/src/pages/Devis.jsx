@@ -25,6 +25,8 @@ export default function Devis() {
   const [loading, setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [initialEntity, setInitialEntity] = useState(null);
+  const [initialOpportuniteId, setInitialOpportuniteId] = useState(null);
+  const [editData, setEditData] = useState(null);
   const [search, setSearch]     = useState('');
   const [filterStatut, setFilterStatut] = useState('');
 
@@ -38,14 +40,36 @@ export default function Devis() {
 
   // Handle URL params from Pipeline "Créer un devis" button
   useEffect(() => {
-    if (searchParams.get('new') !== '1') return;
-    const nom        = searchParams.get('nom') || '';
-    const prospectId = searchParams.get('prospect_id') || '';
-    if (prospectId || nom) {
-      setInitialEntity(prospectId ? { id: Number(prospectId), nom, type: 'prospect' } : { id: null, nom, type: 'prospect' });
+    if (searchParams.get('new') === '1') {
+      const nom        = searchParams.get('nom') || '';
+      const prospectId = searchParams.get('prospect_id') || '';
+      const clientId   = searchParams.get('client_id') || '';
+      const oppId      = searchParams.get('opp_id') || '';
+      if (clientId) {
+        setInitialEntity({ id: Number(clientId), nom, type: 'client' });
+      } else if (prospectId || nom) {
+        setInitialEntity(prospectId ? { id: Number(prospectId), nom, type: 'prospect' } : { id: null, nom, type: 'prospect' });
+      }
+      setInitialOpportuniteId(oppId ? Number(oppId) : null);
+      setEditData(null);
+      setShowModal(true);
+      setSearchParams({}, { replace: true });
+      return;
     }
-    setShowModal(true);
-    setSearchParams({}, { replace: true });
+    const editId = searchParams.get('edit');
+    if (editId) {
+      api.get(`/devis/${editId}`).then(r => {
+        const d = r.data;
+        setEditData(d);
+        setInitialEntity(
+          d.client_id ? { id: d.client_id, nom: d.client_nom || '', type: 'client' } :
+          d.prospect_id ? { id: d.prospect_id, nom: d.prospect_nom || '', type: 'prospect' } :
+          null
+        );
+        setShowModal(true);
+        setSearchParams({}, { replace: true });
+      }).catch(() => alert('Devis introuvable'));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -79,7 +103,7 @@ export default function Devis() {
         <h1>Devis</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className="text-muted text-sm">{filtered.length} devis · {fmt(totalTTC)} TTC</span>
-          {canEdit && <button className="btn btn-primary" onClick={() => { setInitialEntity(null); setShowModal(true); }}>+ Nouveau devis</button>}
+          {canEdit && <button className="btn btn-primary" onClick={() => { setInitialEntity(null); setInitialOpportuniteId(null); setEditData(null); setShowModal(true); }}>+ Nouveau devis</button>}
         </div>
       </div>
 
@@ -167,7 +191,7 @@ export default function Devis() {
                                 value={d.statut} onChange={e => changeStatut(d, e.target.value)}>
                                 {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                               </select>
-                              <button className="btn btn-ghost btn-sm" title="Aperçu document" onClick={() => { const t = localStorage.getItem('token'); window.open(`/api/devis/${d.id}/html?token=${t}`, '_blank'); }}>📄</button>
+                              <button className="btn btn-ghost btn-sm" title="Aperçu document" onClick={() => { const t = localStorage.getItem('parfi_token'); window.open(`/api/devis/${d.id}/html?token=${t}`, '_blank'); }}>📄</button>
                               <button className="btn btn-ghost btn-sm" title="Dupliquer" onClick={async e => { e.stopPropagation(); try { const r = await api.post(`/devis/${d.id}/dupliquer`); navigate(`/devis/${r.data.id}`); } catch { alert('Erreur duplication'); } }}>📋</button>
                               {user?.role === 'expert' && <button className="btn btn-danger btn-sm" onClick={() => del(d)}>🗑</button>}
                             </div>
@@ -195,8 +219,10 @@ export default function Devis() {
         <HonorairesModal
           type="devis"
           initialEntity={initialEntity}
-          onSaved={async (id) => { setShowModal(false); await reload(); navigate(`/devis/${id}`); }}
-          onClose={() => setShowModal(false)}
+          initialOpportuniteId={initialOpportuniteId}
+          initialData={editData}
+          onSaved={async (id) => { setShowModal(false); setEditData(null); setInitialOpportuniteId(null); await reload(); navigate(`/devis/${id}`); }}
+          onClose={() => { setShowModal(false); setEditData(null); setInitialOpportuniteId(null); }}
         />
       )}
     </>

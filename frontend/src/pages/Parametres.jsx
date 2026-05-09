@@ -80,7 +80,20 @@ export default function Parametres() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/parametres').then(r => { if (r.data) setForm(f => ({ ...f, ...r.data })); }),
+      api.get('/parametres').then(r => {
+        if (!r.data) return;
+        const parseJson = v => {
+          if (v == null) return [];
+          if (Array.isArray(v)) return v;
+          if (typeof v === 'string') { try { return JSON.parse(v) || []; } catch { return []; } }
+          return [];
+        };
+        setForm(f => ({
+          ...f, ...r.data,
+          atouts:      parseJson(r.data.atouts),
+          engagements: parseJson(r.data.engagements),
+        }));
+      }),
 
       api.get('/clients').then(r => setClients(r.data || [])).catch(() => {}),
       api.get('/parametres/clauses').then(r => setClauses(r.data || [])).catch(() => {}),
@@ -201,6 +214,57 @@ export default function Parametres() {
             </div>
             <F form={form} setForm={setForm} label="Site web" name="siteWeb" placeholder="https://www.parfi-france.fr" />
             <F form={form} setForm={setForm} label="Assurance RCP" name="assuranceRCP" placeholder="Compagnie / N° de police" />
+          </div>
+        </div>
+
+        {/* Présentation cabinet (PDF devis) */}
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <h3 className="card-title">Présentation cabinet (PDF devis)</h3>
+            <span className="text-muted text-sm">Textes affichés sur le PDF généré pour chaque devis</span>
+          </div>
+          <div className="card-body">
+            <F form={form} setForm={setForm} label="Description du cabinet (page 2 du PDF)" name="description_cabinet" rows={4}
+               placeholder="Court paragraphe présentant le cabinet. Plusieurs paragraphes : les séparer par une ligne vide. Balises <b>…</b> autorisées." />
+
+            <div style={{ marginTop: 16 }}>
+              <label className="form-label">Atouts du cabinet (page 2)</label>
+              {(form.atouts || []).map((a, idx) => (
+                <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 8, marginBottom: 8, alignItems: 'start' }}>
+                  <input className="form-control" placeholder="Titre" value={a.titre || ''}
+                    onChange={e => setForm(f => ({ ...f, atouts: f.atouts.map((x, i) => i === idx ? { ...x, titre: e.target.value } : x) }))} />
+                  <textarea className="form-control" rows={2} placeholder="Description" value={a.description || ''}
+                    onChange={e => setForm(f => ({ ...f, atouts: f.atouts.map((x, i) => i === idx ? { ...x, description: e.target.value } : x) }))} />
+                  <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" style={{ color: 'var(--danger)' }}
+                    onClick={() => setForm(f => ({ ...f, atouts: f.atouts.filter((_, i) => i !== idx) }))}>×</button>
+                </div>
+              ))}
+              <button type="button" className="btn btn-ghost btn-sm"
+                onClick={() => setForm(f => ({ ...f, atouts: [...(f.atouts || []), { titre: '', description: '' }] }))}>
+                + Ajouter un atout
+              </button>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <label className="form-label">Nos engagements (page 3) — une ligne par engagement</label>
+              {(form.engagements || []).map((eng, idx) => (
+                <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, marginBottom: 6 }}>
+                  <input className="form-control" value={eng}
+                    onChange={e => setForm(f => ({ ...f, engagements: f.engagements.map((x, i) => i === idx ? e.target.value : x) }))} />
+                  <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" style={{ color: 'var(--danger)' }}
+                    onClick={() => setForm(f => ({ ...f, engagements: f.engagements.filter((_, i) => i !== idx) }))}>×</button>
+                </div>
+              ))}
+              <button type="button" className="btn btn-ghost btn-sm"
+                onClick={() => setForm(f => ({ ...f, engagements: [...(f.engagements || []), ''] }))}>
+                + Ajouter un engagement
+              </button>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <F form={form} setForm={setForm} label="Texte 4e de couverture (page 4)" name="texte_4e_couverture" rows={5}
+                 placeholder="Texte affiché sur la dernière page (« Parlons de votre projet »). Séparer les paragraphes par une ligne vide." />
+            </div>
           </div>
         </div>
 

@@ -64,13 +64,43 @@ SECTION_COLORS = {
     'Conseil':      HexColor('#0f766e'),
 }
 
-ENGAGEMENTS = [
+DEFAULT_DESCRIPTION_CABINET = (
+    '<b>ParFi France</b> est un cabinet d’expertise comptable et de commissariat '
+    'aux comptes implanté à Longwy, au cœur du bassin lorrain. '
+    'Nous accompagnons les entreprises, associations et professionnels indépendants '
+    'dans la gestion de leurs obligations comptables, fiscales, sociales et juridiques.'
+)
+
+DEFAULT_ATOUTS = [
+    {'titre': 'Expertise locale',
+     'description': 'Implantés à Longwy, nous connaissons le tissu économique '
+                    'du territoire et les spécificités du bassin lorrain.'},
+    {'titre': 'Maîtrise réglementaire',
+     'description': 'Notre équipe assure une veille fiscale, sociale et juridique permanente '
+                    'pour vous prémunir de tout risque de non-conformité.'},
+    {'titre': 'Interlocuteur dédié',
+     'description': 'Un chef de mission est désigné pour votre dossier, garantissant '
+                    'continuité de service et réactivité optimale.'},
+    {'titre': 'Vision globale',
+     'description': 'Au-delà de la comptabilité, nous vous accompagnons dans vos '
+                    'décisions stratégiques : investissements, développement, transmission.'},
+]
+
+DEFAULT_ENGAGEMENTS = [
     'Un interlocuteur dédié, joignable du lundi au vendredi 9h–18h',
     'Une réponse à toute question écrite sous 48 heures ouvrées',
     'Un entretien annuel de présentation des comptes',
     'Le respect strict des échéances déclaratives, sans exception',
     'Une note d’honoraires détaillée et lisible, sans facturation surprise',
 ]
+
+DEFAULT_TEXTE_4E = (
+    'Si cette proposition vous convient, vous nous retournez ce devis signé. '
+    'Nous établissons alors la lettre de mission OEC. Une fois la lettre signée, '
+    'votre dossier est ouvert et nous pouvons commencer.\n\n'
+    'Pour toute question — sur le périmètre, le tarif, les modalités, ou simplement '
+    'pour creuser un point — joignez-moi directement.'
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -271,21 +301,14 @@ def draw_back_canvas(c, data):
     c.drawCentredString(cx, H * 0.58, 'Parlons de votre projet.')
 
     # ── Body text ─────────────────────────────────────────────────────────────
-    para1 = (
-        'Si cette proposition vous convient, vous nous retournez ce devis signé. '
-        'Nous établissons alors la lettre de mission OEC. Une fois la lettre signée, '
-        'votre dossier est ouvert et nous pouvons commencer.'
-    )
-    para2 = (
-        'Pour toute question — sur le périmètre, le tarif, les modalités, ou simplement '
-        'pour creuser un point — joignez-moi directement.'
-    )
+    texte_4e = (cab.get('texte_4e_couverture') or '').strip() or DEFAULT_TEXTE_4E
+    paragraphs = [pg.strip() for pg in texte_4e.split('\n\n') if pg.strip()]
 
     y = H * 0.47
-    y = _draw_wrapped_centered(c, para1, cx, y, content_max_w,
-                               'Helvetica', 9.5, LIGHT, 5.5 * mm)
-    y = _draw_wrapped_centered(c, para2, cx, y - 5 * mm, content_max_w,
-                               'Helvetica', 9.5, LIGHT, 5.5 * mm)
+    for i, para in enumerate(paragraphs):
+        offset = 0 if i == 0 else 5 * mm
+        y = _draw_wrapped_centered(c, para, cx, y - offset, content_max_w,
+                                   'Helvetica', 9.5, LIGHT, 5.5 * mm)
 
     # ── Signature block ───────────────────────────────────────────────────────
     sig_y = y - 14 * mm
@@ -354,35 +377,30 @@ def draw_content_deco(c, doc, data):
 def build_page2(data):
     story = []
     pros   = data.get('prospect', {})
+    cab    = data.get('cabinet', {})
     besoin = data.get('comprehension_besoin', '')
 
     story.append(section_bar('QUI SOMMES-NOUS ?'))
     story.append(Spacer(1, 6 * mm))
 
-    story.append(p(
-        '<b>ParFi France</b> est un cabinet d’expertise comptable et de commissariat '
-        'aux comptes implanté à Longwy, au cœur du bassin lorrain. '
-        'Nous accompagnons les entreprises, associations et professionnels indépendants '
-        'dans la gestion de leurs obligations comptables, fiscales, sociales et juridiques.',
-        fontSize=10, textColor=HexColor('#374151'), leading=16, alignment=TA_JUSTIFY,
-        spaceAfter=4,
-    ))
+    desc_text = (cab.get('description_cabinet') or '').strip() or DEFAULT_DESCRIPTION_CABINET
+    for paragraph in desc_text.split('\n\n'):
+        if paragraph.strip():
+            story.append(p(
+                paragraph.strip(),
+                fontSize=10, textColor=HexColor('#374151'), leading=16, alignment=TA_JUSTIFY,
+                spaceAfter=4,
+            ))
 
-    atouts = [
-        ('Expertise locale',
-         'Implantés à Longwy, nous connaissons le tissu économique '
-         'du territoire et les spécificités du bassin lorrain.'),
-        ('Maîtrise réglementaire',
-         'Notre équipe assure une veille fiscale, sociale et juridique permanente '
-         'pour vous prémunir de tout risque de non-conformité.'),
-        ('Interlocuteur dédié',
-         'Un chef de mission est désigné pour votre dossier, garantissant '
-         'continuité de service et réactivité optimale.'),
-        ('Vision globale',
-         'Au-delà de la comptabilité, nous vous accompagnons dans vos '
-         'décisions stratégiques : investissements, développement, '
-         'transmission.'),
-    ]
+    raw_atouts = cab.get('atouts')
+    if not raw_atouts or not isinstance(raw_atouts, list):
+        raw_atouts = DEFAULT_ATOUTS
+    atouts = []
+    for a in raw_atouts:
+        if isinstance(a, dict):
+            atouts.append((a.get('titre') or '', a.get('description') or ''))
+        elif isinstance(a, (list, tuple)) and len(a) >= 2:
+            atouts.append((a[0], a[1]))
 
     for title, desc in atouts:
         row = Table([[
@@ -574,7 +592,11 @@ def build_page3(data):
     story.append(section_bar('NOS ENGAGEMENTS'))
     story.append(Spacer(1, 3 * mm))
 
-    for eng in ENGAGEMENTS:
+    cab = data.get('cabinet', {})
+    engagements = cab.get('engagements')
+    if not engagements or not isinstance(engagements, list):
+        engagements = DEFAULT_ENGAGEMENTS
+    for eng in engagements:
         eng_row = Table([[
             p('✓', fontSize=10, fontName='Helvetica-Bold', textColor=BLUE,
               alignment=TA_CENTER),
