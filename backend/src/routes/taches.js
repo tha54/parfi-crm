@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const { verifyToken, requireRole } = require('../middleware/auth');
 const { getVisibleUserIds, canManageOthers, inClause } = require('../utils/scope');
+const { echeancesClient, nextOccurrence } = require('../utils/fiscalEcheances');
 
 router.get('/', verifyToken, async (req, res) => {
   try {
@@ -150,6 +151,7 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     const [[prevTask]] = await pool.query(
       `SELECT t.statut, t.date_echeance, t.utilisateur_id, t.assigne_par, t.titre, t.description,
+              t.periodicite, t.client_id, t.categorie, t.type_travail, t.budget_minutes, t.priorite,
               u.prenom AS assignee_prenom, u.nom AS assignee_nom
        FROM taches t
        LEFT JOIN utilisateurs u ON t.utilisateur_id = u.id
@@ -237,10 +239,73 @@ router.put('/:id', verifyToken, async (req, res) => {
           [assignerId, `${assigneeName} a terminé : ${desc}`]
         );
       }
+
+      // Auto-régénération des tâches périodiques
+      if (wasNotDone && isNowDone && prevTask.periodicite) {
+        const nextDate = nextOccurrence(prevTask.date_echeance, prevTask.periodicite);
+        if (nextDate) {
+          const [existing] = await pool.query(
+            `SELECT id FROM taches WHERE client_id = ? AND titre = ? AND date_echeance = ? LIMIT 1`,
+            [prevTask.client_id, prevTask.titre, nextDate]
+          );
+          if (existing.length === 0) {
+            await pool.query(
+              `INSERT INTO taches (client_id, utilisateur_id, titre, libelle, date_echeance, priorite,
+                                   categorie, type_travail, budget_minutes, periodicite, origine, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'fiscale', 'fiscale')`,
+              [prevTask.client_id, prevTask.utilisateur_id, prevTask.titre, prevTask.titre,
+               nextDate, prevTask.priorite || 'normale', prevTask.categorie,
+               prevTask.type_travail, prevTask.budget_minutes || null, prevTask.periodicite]
+            );
+          }
+        }
+      }
     }
 
     res.json({ message: 'Tâche mise à jour' });
   } catch {
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+});
+
+router.post('/generer-echeances', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const annee = parseInt(req.body.annee) || new Date().getFullYear();
+  try {
+    const [clients] = await pool.query(
+      `SELECT c.id, c.nom, c.regime_tva, c.periodicite_tva, c.regime_fiscal,
+              c.date_cloture, c.regime, c.type,
+              a.utilisateur_id AS responsable_id
+       FROM clients c
+       LEFT JOIN attributions a ON a.client_id = c.id AND a.role_sur_dossier = 'responsable'
+       WHERE c.statut = 'actif'`
+    );
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const client of clients) {
+      const tasks = echeancesClient(client, annee);
+      for (const t of tasks) {
+        const [dup] = await pool.query(
+          `SELECT id FROM taches WHERE client_id = ? AND titre = ? AND YEAR(date_echeance) = ? LIMIT 1`,
+          [t.client_id, t.titre, annee]
+        );
+        if (dup.length > 0) { skipped++; continue; }
+
+        await pool.query(
+          `INSERT INTO taches (client_id, utilisateur_id, titre, libelle, date_echeance, priorite,
+                               categorie, type_travail, periodicite, origine, source, statut)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'fiscale', 'fiscale', 'a_faire')`,
+          [t.client_id, client.responsable_id || req.user.id, t.titre, t.titre,
+           t.date_echeance, t.priorite, t.categorie, t.type_travail, t.periodicite]
+        );
+        created++;
+      }
+    }
+
+    res.json({ created, skipped, annee });
+  } catch (err) {
+    console.error('generer-echeances:', err);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 });

@@ -797,6 +797,10 @@ export default function Taches() {
   const [taskDeps, setTaskDeps]     = useState({});
   const [periode, setPeriode]       = useState('aujourd_hui');
   const [view, setView]             = useState('liste');
+  const [echeancesModal, setEcheancesModal] = useState(false);
+  const [echeancesAnnee, setEcheancesAnnee] = useState(new Date().getFullYear());
+  const [echeancesResult, setEcheancesResult] = useState(null);
+  const [echeancesLoading, setEcheancesLoading] = useState(false);
 
   const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role) ||
     ['chef_de_groupe', 'chef_de_mission'].includes(user?.role_metier);
@@ -874,7 +878,14 @@ export default function Taches() {
     <>
       <div className="page-header">
         <h1>{isExpertOrChef ? 'Toutes les tâches' : 'Mes tâches'}</h1>
-        <button className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>+ Nouvelle tâche</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {isExpertOrChef && (
+            <button className="btn btn-ghost" onClick={() => { setEcheancesResult(null); setEcheancesModal(true); }}>
+              📅 Échéances fiscales
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>+ Nouvelle tâche</button>
+        </div>
       </div>
 
       <div className="page-body">
@@ -998,6 +1009,68 @@ export default function Taches() {
         <Modal title="Modifier la tâche" onClose={() => setModal(null)}>
           <TacheForm initial={modal.tache} clients={clients} users={users} currentUser={user}
             onSave={() => { setModal(null); load(); }} onCancel={() => setModal(null)} />
+        </Modal>
+      )}
+
+      {/* ── Échéances fiscales modal ── */}
+      {echeancesModal && (
+        <Modal title="Générer les échéances fiscales" onClose={() => setEcheancesModal(false)}>
+          <div style={{ padding: '8px 0' }}>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+              Génère automatiquement les tâches fiscales (TVA, acomptes IS, liasse fiscale, CFE)
+              pour tous les clients actifs selon leur régime, pour l'année choisie.
+            </p>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Année</label>
+            <select
+              value={echeancesAnnee}
+              onChange={e => setEcheancesAnnee(Number(e.target.value))}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, marginBottom: 20 }}
+            >
+              {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+
+            {echeancesResult && (
+              <div style={{
+                background: echeancesResult.created > 0 ? '#f0fdf4' : '#fefce8',
+                border: `1px solid ${echeancesResult.created > 0 ? '#86efac' : '#fde047'}`,
+                borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  {echeancesResult.created > 0
+                    ? `✅ ${echeancesResult.created} tâche(s) créée(s)`
+                    : '⚠️ Aucune tâche créée'}
+                </div>
+                <div style={{ color: 'var(--text-muted)' }}>
+                  {echeancesResult.skipped} tâche(s) ignorée(s) (déjà existantes) · Année {echeancesResult.annee}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setEcheancesModal(false)}>Annuler</button>
+              <button
+                className="btn btn-primary"
+                disabled={echeancesLoading}
+                onClick={async () => {
+                  setEcheancesLoading(true);
+                  setEcheancesResult(null);
+                  try {
+                    const r = await api.post('/taches/generer-echeances', { annee: echeancesAnnee });
+                    setEcheancesResult(r.data);
+                    load();
+                  } catch {
+                    setEcheancesResult({ created: 0, skipped: 0, annee: echeancesAnnee });
+                  } finally {
+                    setEcheancesLoading(false);
+                  }
+                }}
+              >
+                {echeancesLoading ? 'Génération…' : 'Générer'}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
 
