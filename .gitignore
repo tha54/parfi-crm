@@ -24,3 +24,14 @@ Thumbs.db
 # PM2
 .pm2/
 *.csv
+
+# Fichiers générés (uploads)
+backend/uploads/devis/*.pdf
+backend/uploads/ldm/*.pdf
+backend/uploads/factures/*.pdf
+backend/uploads/lettres/*.pdf
+
+# Python bytecode
+backend/src/python/__pycache__/
+*.pyc
+*.pyo
