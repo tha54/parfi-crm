@@ -595,7 +595,8 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
 
 router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   const { statut, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin, client_id,
-          signatureClient, dateSignatureClient } = req.body;
+          signatureClient, dateSignatureClient,
+          periodicite_facturation, date_premiere_facture } = req.body;
   try {
     // Récupérer l'ancien statut
     const [[prev]] = await pool.query('SELECT statut FROM lettres_mission WHERE id=?', [req.params.id]);
@@ -610,6 +611,8 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     if (client_id !== undefined) { fields.push('client_id = ?'); values.push(client_id); }
     if (signatureClient !== undefined) { fields.push('signatureClient = ?'); values.push(signatureClient); }
     if (dateSignatureClient !== undefined) { fields.push('dateSignatureClient = ?'); values.push(dateSignatureClient); }
+    if (periodicite_facturation !== undefined) { fields.push('periodicite_facturation = ?'); values.push(periodicite_facturation || null); }
+    if (date_premiere_facture !== undefined) { fields.push('date_premiere_facture = ?'); values.push(date_premiere_facture || null); }
 
     if (!fields.length) return res.status(400).json({ message: 'Aucun champ' });
     values.push(req.params.id);

@@ -63,6 +63,7 @@ router.get('/:id', verifyToken, async (req, res) => {
     const [[f]] = await pool.query(
       `SELECT f.*,
               c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse,
+              COALESCE(c.email_dirigeant, c.portal_email) AS client_email,
               u.prenom AS collab_prenom, u.nom AS collab_nom,
               lm.numero AS ldm_numero,
               COALESCE(d.id, lm.devis_id) AS devis_id_resolved,
@@ -148,7 +149,8 @@ router.post('/:id/marquer-vu', verifyToken, requireRole('expert', 'chef_mission'
 
 router.post('/:id/emettre', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   try {
-    res.json(await factureService.emettre(Number(req.params.id), req.user.id));
+    const { email_override, sauvegarder_email } = req.body || {};
+    res.json(await factureService.emettre(Number(req.params.id), req.user.id, { email_override, sauvegarder_email }));
   } catch (e) { res.status(e.status || 500).json({ message: e.message }); }
 });
 

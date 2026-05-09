@@ -9,8 +9,6 @@ const CHAPITRES = [
   { key: 'social',           label: 'Social',             color: '#7e22ce', bg: '#fdf4ff' },
   { key: 'juridique',        label: 'Juridique',          color: '#9a3412', bg: '#fff7ed' },
 ];
-const CHAPITRE_OPTS = CHAPITRES.map(c => ({ value: c.key, label: c.label }));
-const PERIODICITES = ['Mensuel', 'Trimestriel', 'Annuel', 'Ponctuel', 'Clôture'];
 
 function sectionToChapitre(section) {
   const s = (section || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -114,13 +112,11 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
   const [notesInternes, setNotesInternes] = useState(initialData?.notesInternes || '');
   const [notesClient, setNotesClient]     = useState(initialData?.notesClient || '');
 
-  // Lignes libres (mode rapide)
+  // Lignes forfait manuelles (inclut les ex-lignes libres)
   const [lignesRapides, setLignesRapides] = useState([]);
-  const [newLigne, setNewLigne] = useState({ libelle: '', chapitre: 'comptable_fiscal', montant_ht: '', periodicite: 'Annuel' });
 
   // Mode chiffré
   const [params, setParams]           = useState(DEFAULT_PARAMS);
-  const [forfaitLines, setForfaitLines]   = useState([]);
   const [calcResult, setCalcResult]       = useState(null);
   const [calcLoading, setCalcLoading]     = useState(false);
   const [calcError, setCalcError]         = useState('');
@@ -197,10 +193,10 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
     setSavedId(initialData.id || null);
   }, [initialData?.id]);
 
-  const doCalcul = useCallback(async (p, fl) => {
+  const doCalcul = useCallback(async (p) => {
     setCalcLoading(true); setCalcError('');
     try {
-      const { data } = await api.post('/chiffrage/calculer', { params: p, rubriques_forfait: fl });
+      const { data } = await api.post('/chiffrage/calculer', { params: p, rubriques_forfait: [] });
       setCalcResult(data);
       setActivesChiffre(prev => {
         const next = { ...prev };
@@ -212,15 +208,14 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
     } finally { setCalcLoading(false); }
   }, []);
 
-  const scheduleCalcul = useCallback((p, fl) => {
+  const scheduleCalcul = useCallback((p) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doCalcul(p, fl), 400);
+    debounceRef.current = setTimeout(() => doCalcul(p), 400);
   }, [doCalcul]);
 
-  const handleParamsChange = (p) => { setParams(p); scheduleCalcul(p, forfaitLines); };
-  const handleForfaitChange = (fl) => { setForfaitLines(fl); scheduleCalcul(params, fl); };
+  const handleParamsChange = (p) => { setParams(p); scheduleCalcul(p); };
 
-  const triggerCalcul = () => doCalcul(params, forfaitLines);
+  const triggerCalcul = () => doCalcul(params);
 
   const lignesChiffreActives = calcResult
     ? calcResult.lignes.filter((_, i) => activesChiffre[i] !== false)
@@ -251,12 +246,6 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
   const tva      = Math.round(totalAccepte * 0.2);
   const totalTTC = totalAccepte + tva;
   const mensualite = Math.round(totalAccepte / 12);
-
-  const addLigneRapide = () => {
-    if (!newLigne.libelle || !newLigne.montant_ht) return;
-    setLignesRapides(l => [...l, { ...newLigne }]);
-    setNewLigne({ libelle: '', chapitre: 'comptable_fiscal', montant_ht: '', periodicite: 'Annuel' });
-  };
 
   const buildPayload = () => {
     const chapitres_remise = {};
@@ -353,8 +342,6 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
     } finally { setSaving(false); }
   };
 
-  const chapitreInfo = (key) => CHAPITRES.find(c => c.key === key) || { label: key, color: '#374151', bg: '#f3f4f6' };
-
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,31,75,0.55)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, padding: '24px 16px', overflowY: 'auto' }}
       onClick={onClose}>
@@ -393,7 +380,7 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
                 Caractéristiques de l'entité
               </span>
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                Appliqué aux lignes libres et au chiffrage
+                Appliqué au calcul des honoraires
               </span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
@@ -421,113 +408,43 @@ export default function HonorairesModal({ type = 'devis', initialEntity = null, 
             </div>
           </div>
 
-          {/* Two blocks side by side on large screens, stacked on small */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+          {/* Chiffrage */}
+          <SectionHeader label="Chiffrage" badge={lignesChiffreActives.length > 0 ? `${lignesChiffreActives.length} ligne${lignesChiffreActives.length > 1 ? 's' : ''}` : null}>
+            <ChiffrageConfig params={params} setParams={handleParamsChange}
+              lignesRapides={lignesRapides} setLignesRapides={setLignesRapides} />
 
-            {/* Block A — Lignes libres */}
-            <SectionHeader label="Lignes libres" badge={lignesRapides.length > 0 ? `${lignesRapides.length} ligne${lignesRapides.length > 1 ? 's' : ''}` : null}>
-              {lignesRapides.length > 0 && (
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10, fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 10 }}>
-                      <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600 }}>Libellé</th>
-                      <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600 }}>Chapitre</th>
-                      <th style={{ textAlign: 'right', padding: '3px 6px', fontWeight: 600 }}>HT</th>
-                      <th style={{ width: 28 }}></th>
-                    </tr>
-                  </thead>
+            <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }}
+              onClick={triggerCalcul} disabled={calcLoading}>
+              {calcLoading ? 'Calcul en cours…' : calcResult ? '↺ Recalculer' : '▶ Calculer les honoraires'}
+            </button>
+
+            {calcError && <div className="alert alert-error" style={{ marginTop: 8, fontSize: 12 }}>{calcError}</div>}
+
+            {calcResult && !calcLoading && (
+              <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 6, maxHeight: 220, overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <tbody>
-                    {lignesRapides.map((l, i) => {
-                      const ci = chapitreInfo(l.chapitre);
+                    {calcResult.lignes.map((l, i) => {
+                      const active = activesChiffre[i] !== false;
                       return (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px' }}>{l.libelle}</td>
-                          <td style={{ padding: '6px' }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: ci.bg, color: ci.color }}>{ci.label}</span>
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)', opacity: active ? 1 : 0.4 }}>
+                          <td style={{ padding: '5px 8px', width: 26 }}>
+                            <input type="checkbox" checked={active}
+                              onChange={e => setActivesChiffre(a => ({ ...a, [i]: e.target.checked }))} />
                           </td>
-                          <td style={{ padding: '6px', textAlign: 'right', fontWeight: 600 }}>{fmt(parseFloat(l.montant_ht))}</td>
-                          <td style={{ padding: '3px' }}>
-                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)', padding: '1px 5px' }}
-                              onClick={() => setLignesRapides(ll => ll.filter((_, idx) => idx !== i))}>×</button>
+                          <td style={{ padding: '5px 4px' }}>
+                            <span style={{ fontWeight: 500 }}>{l.libelle}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>{l.section} · {l.periodicite}</span>
                           </td>
+                          <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmt(l.tarif_ht)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-              )}
-              <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 10, border: '1px solid var(--border)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                  <div className="form-group" style={{ margin: 0, gridColumn: '1/-1' }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Libellé</label>
-                    <input className="form-control" placeholder="Ex. Déclaration IR 2025"
-                      value={newLigne.libelle} onChange={e => setNewLigne(n => ({ ...n, libelle: e.target.value }))} />
-                  </div>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Chapitre</label>
-                    <select className="form-control" value={newLigne.chapitre}
-                      onChange={e => setNewLigne(n => ({ ...n, chapitre: e.target.value }))}>
-                      {CHAPITRE_OPTS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Périodicité</label>
-                    <select className="form-control" value={newLigne.periodicite}
-                      onChange={e => setNewLigne(n => ({ ...n, periodicite: e.target.value }))}>
-                      {PERIODICITES.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label" style={{ fontSize: 11 }}>Montant HT (€)</label>
-                    <input type="number" className="form-control" placeholder="0" min="0" step="50"
-                      value={newLigne.montant_ht} onChange={e => setNewLigne(n => ({ ...n, montant_ht: e.target.value }))} />
-                  </div>
-                  <div style={{ gridColumn: '1/-1' }}>
-                    <button className="btn btn-ghost" style={{ width: '100%' }} onClick={addLigneRapide}
-                      disabled={!newLigne.libelle || !newLigne.montant_ht}>+ Ajouter la ligne</button>
-                  </div>
-                </div>
               </div>
-            </SectionHeader>
-
-            {/* Block B — Chiffrage */}
-            <SectionHeader label="Chiffrage" badge={lignesChiffreActives.length > 0 ? `${lignesChiffreActives.length} ligne${lignesChiffreActives.length > 1 ? 's' : ''}` : null}>
-              <ChiffrageConfig params={params} setParams={handleParamsChange}
-                forfaitLines={forfaitLines} setForfaitLines={handleForfaitChange} />
-
-              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }}
-                onClick={triggerCalcul} disabled={calcLoading}>
-                {calcLoading ? 'Calcul en cours…' : calcResult ? '↺ Recalculer' : '▶ Calculer les honoraires'}
-              </button>
-
-              {calcError && <div className="alert alert-error" style={{ marginTop: 8, fontSize: 12 }}>{calcError}</div>}
-
-              {calcResult && !calcLoading && (
-                <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 6, maxHeight: 220, overflowY: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <tbody>
-                      {calcResult.lignes.map((l, i) => {
-                        const active = activesChiffre[i] !== false;
-                        return (
-                          <tr key={i} style={{ borderBottom: '1px solid var(--border)', opacity: active ? 1 : 0.4 }}>
-                            <td style={{ padding: '5px 8px', width: 26 }}>
-                              <input type="checkbox" checked={active}
-                                onChange={e => setActivesChiffre(a => ({ ...a, [i]: e.target.checked }))} />
-                            </td>
-                            <td style={{ padding: '5px 4px' }}>
-                              <span style={{ fontWeight: 500 }}>{l.libelle}</span>
-                              <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>{l.section} · {l.periodicite}</span>
-                            </td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmt(l.tarif_ht)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </SectionHeader>
-          </div>
+            )}
+          </SectionHeader>
 
           {/* Chapitres recap + remise */}
           {totalTheorique > 0 && (

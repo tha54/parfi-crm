@@ -43,6 +43,9 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
   const [showAnnulForm, setShowAnnulForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [emailModal, setEmailModal] = useState(false);
+  const [emailSaisi, setEmailSaisi] = useState('');
+  const [sauvegarderEmail, setSauvegarderEmail] = useState(true);
 
   const load = useCallback(async () => {
     const r = await api.get(`/factures/${factureId}`);
@@ -60,8 +63,6 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
       if (endpoint === 'emettre') {
         if (r.data.email_envoye) {
           setSuccessMsg(`✅ Facture émise et envoyée par email à ${r.data.email_destinataire}`);
-        } else if (r.data.email_destinataire === null) {
-          setSuccessMsg('⚠️ Facture émise — aucun email client renseigné, envoi impossible');
         } else {
           setSuccessMsg('⚠️ Facture émise — échec de l\'envoi email (vérifiez la config Brevo)');
         }
@@ -70,6 +71,24 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
       onRefresh();
     } catch (e) { setErr(e.response?.data?.message || 'Erreur'); }
     finally { setBusy(false); }
+  };
+
+  const handleEmettre = () => {
+    if (!f.client_email) {
+      setEmailSaisi('');
+      setSauvegarderEmail(true);
+      setEmailModal(true);
+    } else {
+      action('emettre');
+    }
+  };
+
+  const confirmerEmettreAvecEmail = async () => {
+    setEmailModal(false);
+    await action('emettre', {
+      email_override: emailSaisi.trim() || undefined,
+      sauvegarder_email: sauvegarderEmail,
+    });
   };
 
   const loadAide = async () => {
@@ -181,7 +200,7 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 8, padding: '6px 10px' }}>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Changer statut :</span>
                 {['brouillon', 'vu'].includes(f.statut) && (
-                  <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => action('emettre')}>🚀 Émettre</button>
+                  <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleEmettre}>🚀 Émettre</button>
                 )}
                 {['emise', 'envoyee', 'retard'].includes(f.statut) && (
                   <button className="btn btn-success btn-sm" disabled={busy} onClick={() => action('marquer-payee')}>💰 Payée</button>
@@ -306,6 +325,54 @@ function FactureDrawer({ factureId, onClose, onRefresh, canEdit }) {
           )}
         </div>
       </div>
+
+      {/* Modal email manquant */}
+      {emailModal && (
+        <div className="modal-overlay" onClick={() => setEmailModal(false)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">📧 Email du client manquant</span>
+              <button className="modal-close" onClick={() => setEmailModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+                Aucun email n'est enregistré pour <strong>{f.client_nom}</strong>.
+                Saisissez-en un pour envoyer la facture, ou laissez vide pour émettre sans envoi.
+              </p>
+              <div className="form-group">
+                <label className="form-label">Email de destination</label>
+                <input
+                  className="form-control"
+                  type="email"
+                  placeholder="client@exemple.fr"
+                  value={emailSaisi}
+                  onChange={e => setEmailSaisi(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              {emailSaisi.trim() && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 16, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={sauvegarderEmail} onChange={e => setSauvegarderEmail(e.target.checked)} />
+                  Enregistrer cet email dans la fiche client
+                </label>
+              )}
+              <div className="form-actions">
+                <button className="btn btn-ghost" onClick={() => setEmailModal(false)}>Annuler</button>
+                <button className="btn btn-ghost" onClick={() => confirmerEmettreAvecEmail()}>
+                  Émettre sans email
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={confirmerEmettreAvecEmail}
+                  disabled={!emailSaisi.trim()}
+                >
+                  🚀 Émettre et envoyer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

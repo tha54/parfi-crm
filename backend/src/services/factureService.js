@@ -115,18 +115,33 @@ async function genererBrouillonsLDM(ldmId, acteurId) {
   if (Number(existing.nb) > 0) return { created: 0, ids: [], message: 'Brouillons déjà existants' };
 
   const [missions] = await pool.query('SELECT * FROM ldm_missions WHERE lettre_mission_id = ?', [ldmId]);
-  if (!missions.length) return { created: 0, ids: [], message: 'Aucune mission sur cette LDM' };
 
-  const periodicite  = normaliserPeriodicite(ldm.modaliteFacturation);
+  const periodicite  = ldm.periodicite_facturation || normaliserPeriodicite(ldm.modaliteFacturation);
   const intervalMois = PERIODICITE_MOIS[periodicite];
   const nbPeriodes   = PERIODICITE_COUNT[periodicite];
 
-  // 1er du mois suivant la date du jour (Q-A: option c)
-  const now = new Date();
-  const debutMois = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  // Date de début : date_premiere_facture > dateDebut > mois en cours
+  let debutMois;
+  if (ldm.date_premiere_facture) {
+    const d = new Date(ldm.date_premiere_facture);
+    debutMois = new Date(d.getFullYear(), d.getMonth(), 1);
+  } else if (ldm.dateDebut) {
+    const d = new Date(ldm.dateDebut);
+    debutMois = new Date(d.getFullYear(), d.getMonth(), 1);
+  } else {
+    const now = new Date();
+    debutMois = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
 
   const [[cab]] = await pool.query('SELECT tauxTva FROM parametres_cabinet LIMIT 1').catch(() => [[{ tauxTva: 20 }]]);
   const tauxTva = Number(cab?.tauxTva || 20);
+
+  // Montant total HT : depuis ldm_missions si disponibles, sinon montantHonorairesHT
+  const montantTotalHT = missions.length
+    ? missions.reduce((s, m) => s + Number(m.honoraires_ht), 0)
+    : parseFloat(ldm.montantHonorairesHT || 0);
+
+  if (montantTotalHT <= 0) return { created: 0, ids: [], message: 'Montant HT nul' };
 
   const createdIds = [];
 
@@ -136,7 +151,7 @@ async function genererBrouillonsLDM(ldmId, acteurId) {
     const moisStr = fmtDate(new Date(moisDate.getFullYear(), moisDate.getMonth(), 1));
     const datePrevStr = fmtDate(datePrevue);
 
-    const totalHT = missions.reduce((s, m) => s + Number(m.honoraires_ht) / nbPeriodes, 0);
+    const totalHT = montantTotalHT / nbPeriodes;
     const totalTVA = totalHT * tauxTva / 100;
     const totalTTC = totalHT + totalTVA;
 
@@ -156,14 +171,22 @@ async function genererBrouillonsLDM(ldmId, acteurId) {
     );
     const factureId = r.insertId;
 
-    for (let j = 0; j < missions.length; j++) {
-      const m = missions[j];
-      const montant = Number(m.honoraires_ht) / nbPeriodes;
+    if (missions.length) {
+      for (let j = 0; j < missions.length; j++) {
+        const m = missions[j];
+        const montant = Number(m.honoraires_ht) / nbPeriodes;
+        await pool.query(
+          `INSERT INTO lignes_facture
+             (factureId, ordre, description, quantite, prixUnitaireHT, totalHT, mission_ldm_id)
+           VALUES (?, ?, ?, 1, ?, ?, ?)`,
+          [factureId, j, m.libelle, montant, montant, m.id]
+        );
+      }
+    } else {
       await pool.query(
-        `INSERT INTO lignes_facture
-           (factureId, ordre, description, quantite, prixUnitaireHT, totalHT, mission_ldm_id)
-         VALUES (?, ?, ?, 1, ?, ?, ?)`,
-        [factureId, j, m.libelle, montant, montant, m.id]
+        `INSERT INTO lignes_facture (factureId, ordre, description, quantite, prixUnitaireHT, totalHT)
+         VALUES (?, 0, ?, 1, ?, ?)`,
+        [factureId, ldm.objetMission || ldm.typeMission || 'Honoraires', totalHT, totalHT]
       );
     }
 
@@ -188,15 +211,18 @@ async function marquerVu(factureId, acteurId) {
   return { id: factureId, statut: 'vu' };
 }
 
-async function emettre(factureId, acteurId) {
+async function emettre(factureId, acteurId, opts = {}) {
   const [[f]] = await pool.query(
-    `SELECT f.*, c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse,
+    `SELECT f.*, c.id AS client_id_real, c.nom AS client_nom, c.siren AS client_siren, c.adresse AS client_adresse,
             COALESCE(c.email_dirigeant, c.portal_email) AS client_email, c.nom AS client_nom2
      FROM factures f LEFT JOIN clients c ON f.client_id = c.id WHERE f.id = ?`,
     [factureId]
   );
   if (!f) throw Object.assign(new Error('Facture introuvable'), { status: 404 });
   if (!['brouillon', 'vu'].includes(f.statut)) throw Object.assign(new Error(`Statut invalide: ${f.statut}`), { status: 400 });
+
+  // Email effectif : email_override saisi à la volée, sinon email enregistré
+  const emailEffectif = (opts.email_override || '').trim() || f.client_email || null;
 
   const numeroFiscal = await nextNumeroFiscal();
   const todayStr = fmtDate(new Date());
@@ -210,9 +236,17 @@ async function emettre(factureId, acteurId) {
   await logEvenement(factureId, 'emission', acteurId, `Facture émise — ${numeroFiscal}`,
     { metadata: { numero_fiscal: numeroFiscal } });
 
+  // Sauvegarder l'email sur la fiche client si demandé et pas déjà renseigné
+  if (emailEffectif && opts.sauvegarder_email && !f.client_email && f.client_id_real) {
+    await pool.query(
+      `UPDATE clients SET email_dirigeant = ? WHERE id = ?`,
+      [emailEffectif, f.client_id_real]
+    ).catch(() => {});
+  }
+
   // Génération PDF + envoi email
   let emailStatut = 'non_envoye';
-  if (f.client_email) {
+  if (emailEffectif) {
     try {
       const [[cab]] = await pool.query('SELECT * FROM parametres_cabinet LIMIT 1').catch(() => [[{}]]);
       const cabinet = cab || {};
@@ -226,7 +260,7 @@ async function emettre(factureId, acteurId) {
         : new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
       await sendEmail({
-        to: f.client_email,
+        to: emailEffectif,
         toName: f.client_nom,
         subject: `Facture ${numeroFiscal} — ${mois}`,
         htmlContent: `<p>Bonjour,</p>
@@ -238,7 +272,7 @@ async function emettre(factureId, acteurId) {
 
       emailStatut = 'envoye';
       await pool.query(`UPDATE factures SET statut = 'envoyee' WHERE id = ?`, [factureId]);
-      await logEvenement(factureId, 'envoi', acteurId, `Facture envoyée par email à ${f.client_email}`);
+      await logEvenement(factureId, 'envoi', acteurId, `Facture envoyée par email à ${emailEffectif}`);
     } catch (emailErr) {
       console.error('Envoi email facture échoué:', emailErr.message);
       await logEvenement(factureId, 'erreur_envoi', acteurId, `Échec envoi email : ${emailErr.message}`);
@@ -250,7 +284,7 @@ async function emettre(factureId, acteurId) {
     statut: emailStatut === 'envoye' ? 'envoyee' : 'emise',
     numero_fiscal: numeroFiscal,
     email_envoye: emailStatut === 'envoye',
-    email_destinataire: f.client_email || null,
+    email_destinataire: emailEffectif,
   };
 }
 

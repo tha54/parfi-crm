@@ -59,7 +59,16 @@ function SectionBadge({ section }) {
   );
 }
 
-export default function ChiffrageConfig({ params, setParams, forfaitLines, setForfaitLines }) {
+const SECTION_TO_CHAPITRE = {
+  'Comptabilité': 'comptable_fiscal', 'Fiscalité': 'comptable_fiscal',
+  'Social': 'social', 'Juridique': 'juridique',
+  'Conseil': 'comptable_fiscal', 'Autre': 'comptable_fiscal',
+};
+const CHAPITRE_TO_SECTION = {
+  'comptable_fiscal': 'Comptabilité', 'social': 'Social', 'juridique': 'Juridique',
+};
+
+export default function ChiffrageConfig({ params, setParams, lignesRapides, setLignesRapides }) {
   const [newForfait, setNewForfait] = useState({
     libelle: '', section: 'Juridique', montant_forfait: '', periodicite: 'Annuel',
   });
@@ -68,11 +77,17 @@ export default function ChiffrageConfig({ params, setParams, forfaitLines, setFo
 
   const addForfaitLine = () => {
     if (!newForfait.libelle || !newForfait.montant_forfait) return;
-    setForfaitLines(fl => [...fl, { ...newForfait, montant_forfait: Number(newForfait.montant_forfait) }]);
+    setLignesRapides(ll => [...ll, {
+      libelle: newForfait.libelle,
+      section: newForfait.section,
+      chapitre: SECTION_TO_CHAPITRE[newForfait.section] || 'comptable_fiscal',
+      montant_ht: String(newForfait.montant_forfait),
+      periodicite: newForfait.periodicite,
+    }]);
     setNewForfait({ libelle: '', section: 'Juridique', montant_forfait: '', periodicite: 'Annuel' });
   };
 
-  const removeForfaitLine = (i) => setForfaitLines(fl => fl.filter((_, idx) => idx !== i));
+  const removeForfaitLine = (i) => setLignesRapides(ll => ll.filter((_, idx) => idx !== i));
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -99,25 +114,29 @@ export default function ChiffrageConfig({ params, setParams, forfaitLines, setFo
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Montants saisis manuellement</span>
         </div>
         <div className="card-body">
-          {forfaitLines.length === 0 && (
+          {lignesRapides.length === 0 && (
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
-              Aucune ligne forfait.
+              Aucune ligne. Ajoutez des missions à montant fixe (juridique ponctuel, conseil, etc.).
             </p>
           )}
-          {forfaitLines.map((l, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                  <SectionBadge section={l.section} />
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>{l.libelle}</span>
+          {lignesRapides.map((l, i) => {
+            const sectionLabel = l.section || CHAPITRE_TO_SECTION[l.chapitre] || 'Autre';
+            const montant = parseFloat(l.montant_ht || l.montant_forfait || 0);
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <SectionBadge section={sectionLabel} />
+                    <span style={{ fontSize: 13, fontWeight: 500 }}>{l.libelle}</span>
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {l.periodicite} — {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(montant)}
+                  </span>
                 </div>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {l.periodicite} — {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(l.montant_forfait)}
-                </span>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => removeForfaitLine(i)}>×</button>
               </div>
-              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => removeForfaitLine(i)}>×</button>
-            </div>
-          ))}
+            );
+          })}
           <div style={{ marginTop: 12, borderTop: forfaitLines.length > 0 ? '1px solid var(--border)' : 'none', paddingTop: forfaitLines.length > 0 ? 12 : 0 }}>
             <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 8 }}>Ajouter une ligne</p>
             <div className="form-group">

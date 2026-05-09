@@ -266,7 +266,7 @@ export default function LDMDetail() {
   const [resilierForm, setResilierForm] = useState({ motif: '', dateResiliation: '' });
   const [annulerModal, setAnnulerModal] = useState(false);
   const [editMission, setEditMission] = useState(false);
-  const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '' });
+  const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '', periodicite_facturation: '', date_premiere_facture: '' });
   const [savingMission, setSavingMission] = useState(false);
 
   const isExpert = user?.role === 'expert';
@@ -498,6 +498,8 @@ export default function LDMDetail() {
       objetMission: ldm.objetMission || '',
       montantHonorairesHT: ldm.montantHonorairesHT || '',
       dateDebut: ldm.dateDebut ? ldm.dateDebut.slice(0, 10) : '',
+      periodicite_facturation: ldm.periodicite_facturation || '',
+      date_premiere_facture: ldm.date_premiere_facture ? ldm.date_premiere_facture.slice(0, 10) : '',
     });
     setEditMission(true);
   };
@@ -509,6 +511,8 @@ export default function LDMDetail() {
         objetMission: missionForm.objetMission || null,
         montantHonorairesHT: Number(missionForm.montantHonorairesHT) || 0,
         dateDebut: missionForm.dateDebut || null,
+        periodicite_facturation: missionForm.periodicite_facturation || null,
+        date_premiere_facture: missionForm.date_premiere_facture || null,
       });
       setEditMission(false);
       setMsg({ type: 'ok', text: '✓ Mission mise à jour' });
@@ -910,6 +914,26 @@ export default function LDMDetail() {
                           onChange={e => setMissionForm(f => ({ ...f, dateDebut: e.target.value }))} />
                       </div>
                     </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontSize: 12 }}>Périodicité de facturation</label>
+                        <select className="form-control"
+                          value={missionForm.periodicite_facturation}
+                          onChange={e => setMissionForm(f => ({ ...f, periodicite_facturation: e.target.value }))}>
+                          <option value="">— Non définie —</option>
+                          <option value="mensuelle">Mensuelle (12×/an)</option>
+                          <option value="trimestrielle">Trimestrielle (4×/an)</option>
+                          <option value="semestrielle">Semestrielle (2×/an)</option>
+                          <option value="annuelle">Annuelle (1×/an)</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label" style={{ fontSize: 12 }}>Date de la 1ère facture</label>
+                        <input type="date" className="form-control"
+                          value={missionForm.date_premiere_facture}
+                          onChange={e => setMissionForm(f => ({ ...f, date_premiere_facture: e.target.value }))} />
+                      </div>
+                    </div>
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label" style={{ fontSize: 12 }}>Objet de la mission</label>
                       <textarea className="form-control" rows={3} style={{ resize: 'vertical', fontSize: 13 }}
@@ -926,20 +950,40 @@ export default function LDMDetail() {
                   </div>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Type</div>
-                        <div style={{ fontWeight: 600 }}>{TYPES_MISSION[ldm.typeMission] || ldm.typeMission}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Honoraires HT</div>
-                        <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{fmt(ldm.montantHonorairesHT)}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Mensuel TTC</div>
-                        <div style={{ fontWeight: 600, color: 'var(--accent-hover)' }}>{fmt(Number(ldm.montantHonorairesHT) * 1.20 / 12)}</div>
-                      </div>
-                    </div>
+                    {(() => {
+                      const PERIO_COUNT = { mensuelle: 12, trimestrielle: 4, semestrielle: 2, annuelle: 1 };
+                      const PERIO_LABEL = { mensuelle: '/mois', trimestrielle: '/trimestre', semestrielle: '/semestre', annuelle: '/an' };
+                      const nb = PERIO_COUNT[ldm.periodicite_facturation] || 12;
+                      const label = PERIO_LABEL[ldm.periodicite_facturation] || '/mois';
+                      const montantHT = Number(ldm.montantHonorairesHT) || 0;
+                      const parPeriode = montantHT / nb;
+                      return (
+                        <div style={{ display: 'flex', gap: 24, marginBottom: 16, flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Type</div>
+                            <div style={{ fontWeight: 600 }}>{TYPES_MISSION[ldm.typeMission] || ldm.typeMission}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Honoraires HT</div>
+                            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--primary)' }}>{fmt(montantHT)}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Périodicité</div>
+                            <div style={{ fontWeight: 600 }}>{ldm.periodicite_facturation || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>non définie</span>}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Par période HT</div>
+                            <div style={{ fontWeight: 600, color: 'var(--accent-hover)' }}>{fmt(parPeriode)}{label}</div>
+                          </div>
+                          {ldm.date_premiere_facture && (
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>1ère facture</div>
+                              <div style={{ fontWeight: 600 }}>{new Date(ldm.date_premiere_facture).toLocaleDateString('fr-FR')}</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {ldm.objetMission && (
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>
                         {ldm.objetMission}
@@ -1239,7 +1283,7 @@ export default function LDMDetail() {
             </div>
             <div className="modal-body">
               {/* Résumé des effets */}
-              <div style={{ background: '#f0f9f4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '12px 14px', marginBottom: 20 }}>
+              <div style={{ background: '#f0f9f4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, color: '#065f46', marginBottom: 6 }}>À la signature, les actions suivantes seront déclenchées :</div>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: '#064e3b', lineHeight: 1.9 }}>
                   <li>Le dossier <strong>{ldm.client_nom}</strong> sera affecté au collaborateur sélectionné</li>
@@ -1248,6 +1292,32 @@ export default function LDMDetail() {
                   <li>Les mandats seront créés et l'échéancier de facturation initialisé</li>
                 </ul>
               </div>
+
+              {/* Récapitulatif plan de facturation */}
+              {(() => {
+                const PERIO_COUNT = { mensuelle: 12, trimestrielle: 4, semestrielle: 2, annuelle: 1 };
+                const PERIO_LABEL = { mensuelle: '/mois', trimestrielle: '/trimestre', semestrielle: '/semestre', annuelle: '/an' };
+                const nb = PERIO_COUNT[ldm.periodicite_facturation];
+                const label = PERIO_LABEL[ldm.periodicite_facturation];
+                const montantHT = Number(ldm.montantHonorairesHT) || 0;
+                if (!ldm.periodicite_facturation || !ldm.date_premiere_facture) {
+                  return (
+                    <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#92400e' }}>
+                      ⚠️ <strong>Plan de facturation incomplet</strong> — pensez à renseigner la périodicité et la date de 1ère facture sur la LDM avant de signer.
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+                    <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>Plan de facturation</div>
+                    <div style={{ color: '#1e3a8a', lineHeight: 1.8 }}>
+                      <span style={{ marginRight: 20 }}>📅 <strong>{nb} facture{nb > 1 ? 's' : ''}</strong> {ldm.periodicite_facturation}</span>
+                      <span style={{ marginRight: 20 }}>💶 <strong>{fmt(montantHT / nb)} €</strong> HT{label}</span>
+                      <span>🗓 1ère facture le <strong>{new Date(ldm.date_premiere_facture).toLocaleDateString('fr-FR')}</strong></span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 {/* Collaborateur */}

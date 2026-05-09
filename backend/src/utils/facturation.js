@@ -33,13 +33,17 @@ async function genererFacturesDepuisLDM(ldmId, options = {}) {
     fiscal: 'annuelle', conseil: 'trimestrielle',
     juridique: 'unique', autre: 'mensuelle',
   };
-  const periodicite = periodiciteMap[ldm.typeMission] || 'mensuelle';
+  const periodicite = ldm.periodicite_facturation || periodiciteMap[ldm.typeMission] || 'mensuelle';
   const moisParPeriode = { mensuelle: 1, trimestrielle: 3, semestrielle: 6, annuelle: 12, unique: 999 };
   const pas = moisParPeriode[periodicite] || 1;
   const nbPeriodes = periodicite === 'unique' ? 1 : Math.ceil(12 / pas);
   const montantPeriode = parseFloat((montantHT / nbPeriodes).toFixed(2));
 
-  const dateDebut = ldm.dateDebut ? new Date(ldm.dateDebut) : new Date();
+  const dateDebut = ldm.date_premiere_facture
+    ? new Date(ldm.date_premiere_facture)
+    : ldm.dateDebut
+      ? new Date(ldm.dateDebut)
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   let cursor = new Date(dateDebut);
   cursor.setDate(1);
 
