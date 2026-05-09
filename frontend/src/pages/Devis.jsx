@@ -73,17 +73,6 @@ export default function Devis() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const changeStatut = async (d, statut) => {
-    try { await api.put(`/devis/${d.id}`, { statut }); await reload(); }
-    catch { alert('Erreur'); }
-  };
-
-  const del = async (d) => {
-    if (!confirm(`Supprimer le devis ${d.numero} ?`)) return;
-    try { await api.delete(`/devis/${d.id}`); await reload(); }
-    catch { alert('Erreur'); }
-  };
-
   const filtered = devis.filter(d => {
     const q = search.toLowerCase();
     const nom = d.client_nom || d.prospect_nom || d.display_nom || '';
@@ -157,7 +146,6 @@ export default function Devis() {
                       <th>Total HT</th>
                       <th>Total TTC</th>
                       <th>Validité</th>
-                      {canEdit && <th>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -184,19 +172,6 @@ export default function Devis() {
                         <td>{fmt(d.totalHT)}</td>
                         <td><strong>{fmt(d.totalTTC)}</strong></td>
                         <td>{d.dateValidite ? new Date(d.dateValidite).toLocaleDateString('fr-FR') : '—'}</td>
-                        {canEdit && (
-                          <td>
-                            <div className="td-actions">
-                              <select className="form-control" style={{ width: 120, fontSize: 12, padding: '4px 8px' }}
-                                value={d.statut} onChange={e => changeStatut(d, e.target.value)}>
-                                {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                              </select>
-                              <button className="btn btn-ghost btn-sm" title="Aperçu document" onClick={() => { const t = localStorage.getItem('parfi_token'); window.open(`/api/devis/${d.id}/html?token=${t}`, '_blank'); }}>📄</button>
-                              <button className="btn btn-ghost btn-sm" title="Dupliquer" onClick={async e => { e.stopPropagation(); try { const r = await api.post(`/devis/${d.id}/dupliquer`); navigate(`/devis/${r.data.id}`); } catch { alert('Erreur duplication'); } }}>📋</button>
-                              {user?.role === 'expert' && <button className="btn btn-danger btn-sm" onClick={() => del(d)}>🗑</button>}
-                            </div>
-                          </td>
-                        )}
                       </tr>
                     ))}
                   </tbody>

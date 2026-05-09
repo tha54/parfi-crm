@@ -9,7 +9,9 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/src/__tests__/**/*.test.js"],
+    "testMatch": [
+      "**/src/__tests__/**/*.test.js"
+    ],
     "forceExit": true
   },
   "dependencies": {
@@ -25,6 +27,7 @@
     "mysql2": "^3.9.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.6",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.18.0",
     "xml2js": "^0.6.2"

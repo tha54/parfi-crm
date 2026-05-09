@@ -64,12 +64,13 @@ app.use(cors({
 // Capture rawBody avant parsing JSON (nécessaire pour vérification signature Yousign)
 app.use((req, res, next) => {
   if (req.path === '/api/signatures/webhook') {
-    let data = '';
-    req.setEncoding('utf8');
-    req.on('data', chunk => { data += chunk; });
+    const chunks = [];
+    req.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
     req.on('end', () => {
-      req.rawBody = data;
-      try { req.body = JSON.parse(data); } catch { req.body = {}; }
+      const raw = Buffer.concat(chunks).toString('utf8');
+      req.rawBody = raw;
+      req._body   = true; // signale à body-parser que le body est déjà lu
+      try { req.body = JSON.parse(raw); } catch { req.body = {}; }
       next();
     });
   } else {

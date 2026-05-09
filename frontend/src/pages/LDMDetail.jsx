@@ -252,12 +252,11 @@ export default function LDMDetail() {
   const [savingRecueil, setSavingRecueil] = useState(false);
   const [loading, setLoading] = useState(true);
   const [signing, setSigning] = useState(false);
-  const [generatingEcheancier, setGeneratingEcheancier] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [pdfReady, setPdfReady] = useState(false);
   const [msg, setMsg] = useState(null);
   const [signModal, setSignModal] = useState(false);
-  const [injecterModal, setInjecterModal] = useState(false);
+  const [activerModal, setActiverModal] = useState(false);
   const [selectedCollab, setSelectedCollab] = useState('');
   const [selectedChef, setSelectedChef] = useState('');
   const [emailModal, setEmailModal] = useState(null);
@@ -267,6 +266,8 @@ export default function LDMDetail() {
   const [annulerModal, setAnnulerModal] = useState(false);
   const [editMission, setEditMission] = useState(false);
   const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '', periodicite_facturation: '', date_premiere_facture: '' });
+  const [dateFactureModal, setDateFactureModal] = useState(false);
+  const [dateFactureForm, setDateFactureForm] = useState({ date_premiere_facture: '', periodicite_facturation: '' });
   const [savingMission, setSavingMission] = useState(false);
 
   const isExpert = user?.role === 'expert';
@@ -341,7 +342,30 @@ export default function LDMDetail() {
     setEmailModal({ nomContact, resolve });
   });
 
+  const confirmDateFacture = async () => {
+    if (!dateFactureForm.date_premiere_facture) return;
+    try {
+      const payload = { date_premiere_facture: dateFactureForm.date_premiere_facture };
+      if (dateFactureForm.periodicite_facturation) payload.periodicite_facturation = dateFactureForm.periodicite_facturation;
+      await api.put(`/lettres-mission/${id}`, payload);
+      setLdm(d => ({ ...d, ...payload }));
+      setDateFactureModal(false);
+      // small delay so state update propagates before envoyerLDM reads ldm
+      setTimeout(() => envoyerLDM(), 0);
+    } catch (e) {
+      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur lors de l\'enregistrement de la date' });
+    }
+  };
+
   const envoyerLDM = async (emailOverride) => {
+    if (!ldm.date_premiere_facture) {
+      setDateFactureForm({
+        date_premiere_facture: '',
+        periodicite_facturation: ldm.periodicite_facturation || '',
+      });
+      setDateFactureModal(true);
+      return;
+    }
     setSigning(true); setMsg(null);
     try {
       const { data } = await api.post(`/lettres-mission/${id}/envoyer`, emailOverride ? { emailOverride } : {});
@@ -380,39 +404,32 @@ export default function LDMDetail() {
         collabName && `collaborateur : ${collabName.prenom} ${collabName.nom}`,
         chefName   && `chef : ${chefName.prenom} ${chefName.nom}`,
       ].filter(Boolean).join(', ');
-      setMsg({ type: 'ok', text: `✓ LDM signée — ${result.tachesCreees} tâche(s) planifiées (${who})` });
+      setMsg({ type: 'ok', text: `✓ LDM signée — ${result.tachesCreees} tâche(s) planifiées, ${result.facturesCreees ?? 0} facture(s) générées (${who})` });
       await load();
     } catch (e) {
       setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur lors de la signature' });
     } finally { setSigning(false); }
   };
 
-  const injecterTaches = async () => {
-    setSigning(true); setMsg(null);
+  const activerLDM = async () => {
+    setSigning(true); setMsg(null); setActiverModal(false);
     try {
       const payload = {
-        ...(selectedCollab && { collaborateur_id: Number(selectedCollab) }),
-        ...(selectedChef   && { chef_mission_id: Number(selectedChef) }),
+        collaborateur_id: Number(selectedCollab),
+        chef_mission_id:  Number(selectedChef),
       };
-      const { data: result } = await api.post(`/lettres-mission/${id}/injecter-taches`, payload);
-      const collabName = selectedCollab ? users.find(u => String(u.id) === String(selectedCollab)) : null;
-      const who = collabName ? ` — planifiées pour ${collabName.prenom} ${collabName.nom}` : '';
-      setMsg({ type: 'ok', text: `✓ ${result.tachesCreees} tâche(s) planifiées${who}` });
+      const { data: result } = await api.post(`/lettres-mission/${id}/activer`, payload);
+      const collabName = users.find(u => String(u.id) === String(selectedCollab));
+      const chefName   = users.find(u => String(u.id) === String(selectedChef));
+      const who = [
+        collabName && `${collabName.prenom} ${collabName.nom}`,
+        chefName   && `chef : ${chefName.prenom} ${chefName.nom}`,
+      ].filter(Boolean).join(', ');
+      setMsg({ type: 'ok', text: `✓ Mission activée — ${result.tachesCreees} tâche(s) planifiées, ${result.facturesCreees ?? 0} facture(s) générées (${who})` });
       await load();
     } catch (e) {
-      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur injection des tâches' });
+      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur lors de l\'activation' });
     } finally { setSigning(false); }
-  };
-
-  const genererEcheancier = async () => {
-    setGeneratingEcheancier(true); setMsg(null);
-    try {
-      const { data } = await api.post(`/lettres-mission/${id}/generer-echeancier`);
-      setMsg({ type: 'ok', text: `✓ ${data.message}` });
-      await load();
-    } catch (e) {
-      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur génération échéancier' });
-    } finally { setGeneratingEcheancier(false); }
   };
 
   const changeStatut = async (statut) => {
@@ -680,31 +697,38 @@ export default function LDMDetail() {
             description={ldm.yousign_request_id
               ? "La LDM a été envoyée via Yousign pour signature électronique. La mission s'activera automatiquement dès que le client aura signé. Vous recevrez une notification."
               : "La LDM a été envoyée par email au client. Quand tu reçois la confirmation de signature, marque-la comme signée pour activer la mission."}
-            primary={ldm.yousign_request_id ? null : {
+            primary={{
               label: signing ? 'Signature…' : '✍️ Marquer comme signée',
               onClick: openSignModal,
               disabled: signing,
               color: '#0f1f4b',
             }}
             secondaries={[
-              ...(ldm.yousign_request_id ? [] : [{ label: signing ? '…' : '↻ Renvoyer par email', onClick: () => envoyerLDM(), disabled: signing }]),
+              { label: signing ? '…' : '↻ Renvoyer', onClick: () => envoyerLDM(), disabled: signing },
             ]}
             color="#f59e0b"
+          />
+        )}
+        {ldm.statut === 'signee' && canPrepare && (
+          <NextStepCard
+            subtitle="Signée — à activer"
+            title="LDM signée — affectez un collaborateur pour démarrer"
+            description="La lettre de mission est signée. Désignez le collaborateur responsable et le chef de mission pour générer les tâches et les brouillons de factures, et activer la mission."
+            primary={{
+              label: signing ? '…' : '🚀 Activer la mission',
+              onClick: () => setActiverModal(true),
+              disabled: signing,
+              color: '#059669',
+            }}
+            color="#00897b"
           />
         )}
         {ldm.statut === 'active' && canPrepare && (
           <NextStepCard
             subtitle="Mission active"
             title="LDM active — mission en cours"
-            description="La lettre de mission est signée et active. Génère l'échéancier de factures pour automatiser la facturation, ou affecte les tâches aux collaborateurs."
-            primary={{
-              label: generatingEcheancier ? '…' : '💳 Générer échéancier de factures',
-              onClick: genererEcheancier,
-              disabled: generatingEcheancier,
-              color: '#059669',
-            }}
+            description="Les tâches ont été planifiées et les brouillons de factures générés automatiquement à la signature."
             secondaries={[
-              { label: '📋 Affecter les tâches', onClick: () => setInjecterModal(true), disabled: signing },
               ...(isExpert ? [{ label: 'Résilier', onClick: () => setResilierModal(true), color: '#dc2626' }] : []),
             ]}
             color="#059669"
@@ -975,10 +999,16 @@ export default function LDMDetail() {
                             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Par période HT</div>
                             <div style={{ fontWeight: 600, color: 'var(--accent-hover)' }}>{fmt(parPeriode)}{label}</div>
                           </div>
+                          {ldm.dateDebut && (
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Début de mission</div>
+                              <div style={{ fontWeight: 600 }}>{new Date(ldm.dateDebut).toLocaleDateString('fr-FR')}</div>
+                            </div>
+                          )}
                           {ldm.date_premiere_facture && (
                             <div>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>1ère facture</div>
-                              <div style={{ fontWeight: 600 }}>{new Date(ldm.date_premiere_facture).toLocaleDateString('fr-FR')}</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>1ère facturation</div>
+                              <div style={{ fontWeight: 600, color: '#059669' }}>{new Date(ldm.date_premiere_facture).toLocaleDateString('fr-FR')}</div>
                             </div>
                           )}
                         </div>
@@ -1223,33 +1253,37 @@ export default function LDMDetail() {
         </div>
       )}
 
-      {/* Modal signature + affectation collaborateur */}
-      {injecterModal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setInjecterModal(false)}>
+      {activerModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setActiverModal(false)}>
           <div className="modal" style={{ maxWidth: 480 }}>
             <div className="modal-header">
-              <span className="modal-title">📋 Injecter les tâches</span>
-              <button className="modal-close" onClick={() => setInjecterModal(false)}>×</button>
+              <span className="modal-title">🚀 Activer la mission</span>
+              <button className="modal-close" onClick={() => setActiverModal(false)}>×</button>
             </div>
             <div className="modal-body">
-              <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 20 }}>
-                Les tâches de la mission seront créées depuis les lignes de dimensionnement et affectées au collaborateur choisi.
-                Si aucun collaborateur n'est sélectionné, les tâches sont réparties selon le type d'intervenant.
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div style={{ background: '#f0f9f4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '12px 14px', marginBottom: 20 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#065f46', marginBottom: 6 }}>L'activation va déclencher :</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: '#064e3b', lineHeight: 1.9 }}>
+                  <li>Affectation du dossier <strong>{ldm.client_nom}</strong> au collaborateur choisi</li>
+                  <li>Planification des tâches dans son planning</li>
+                  <li>Génération des brouillons de factures</li>
+                  <li>Création des mandats (prélèvement, impôts, URSSAF)</li>
+                </ul>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: 12 }}>Collaborateur</label>
+                  <label className="form-label">Collaborateur *</label>
                   <select className="form-control" value={selectedCollab} onChange={e => setSelectedCollab(e.target.value)}>
-                    <option value="">— Répartition par intervenant —</option>
+                    <option value="">— Sélectionner —</option>
                     {users.filter(u => u.actif !== 0).sort((a, b) => a.prenom.localeCompare(b.prenom)).map(u => (
                       <option key={u.id} value={u.id}>{u.prenom} {u.nom}</option>
                     ))}
                   </select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: 12 }}>Chef de mission / groupe</label>
+                  <label className="form-label">Chef de mission *</label>
                   <select className="form-control" value={selectedChef} onChange={e => setSelectedChef(e.target.value)}>
-                    <option value="">— Inchangé —</option>
+                    <option value="">— Sélectionner —</option>
                     {users.filter(u => u.actif !== 0 && (
                       ['expert','chef_mission'].includes(u.role) ||
                       ['expert_comptable','chef_de_groupe','chef_de_mission'].includes(u.role_metier)
@@ -1260,13 +1294,14 @@ export default function LDMDetail() {
                 </div>
               </div>
               <div className="form-actions" style={{ marginTop: 24 }}>
-                <button className="btn btn-ghost" onClick={() => setInjecterModal(false)}>Annuler</button>
+                <button className="btn btn-ghost" onClick={() => setActiverModal(false)}>Annuler</button>
                 <button
                   className="btn btn-primary"
-                  onClick={() => { setInjecterModal(false); injecterTaches(); }}
-                  style={{ background: '#0f1f4b' }}
+                  onClick={activerLDM}
+                  disabled={!selectedCollab || !selectedChef}
+                  style={{ background: '#059669' }}
                 >
-                  📋 Planifier les tâches
+                  🚀 Activer la mission
                 </button>
               </div>
             </div>
@@ -1289,7 +1324,8 @@ export default function LDMDetail() {
                   <li>Le dossier <strong>{ldm.client_nom}</strong> sera affecté au collaborateur sélectionné</li>
                   <li>Les tâches de la mission seront planifiées dans son planning{ldm.dateDebut ? ` à partir du ${new Date(ldm.dateDebut).toLocaleDateString('fr-FR')}` : ''}</li>
                   <li>Les tâches périodiques (mensuelles, trimestrielles…) génèrent une occurrence par échéance sur 12 mois</li>
-                  <li>Les mandats seront créés et l'échéancier de facturation initialisé</li>
+                  <li>Les mandats seront créés</li>
+                  <li>Les brouillons de factures seront générés automatiquement</li>
                 </ul>
               </div>
 
@@ -1472,6 +1508,59 @@ export default function LDMDetail() {
                   style={{ background: '#6b7280', borderColor: '#6b7280' }}
                 >
                   {signing ? 'Annulation…' : '⛔ Confirmer l\'annulation'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal date première facture — obligatoire avant envoi au client */}
+      {dateFactureModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDateFactureModal(false)}>
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <span className="modal-title">📅 Date de la première facture</span>
+              <button className="modal-close" onClick={() => setDateFactureModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 18, fontSize: 13, color: '#92400e' }}>
+                La date de la première facture est obligatoire avant l'envoi au client. Elle détermine le point de départ du plan de facturation.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Date 1ère facture <span style={{ color: '#dc2626' }}>*</span></label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={dateFactureForm.date_premiere_facture}
+                    onChange={e => setDateFactureForm(f => ({ ...f, date_premiere_facture: e.target.value }))}
+                    autoFocus
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Périodicité{!ldm.periodicite_facturation && <span style={{ color: '#dc2626' }}> *</span>}</label>
+                  <select
+                    className="form-control"
+                    value={dateFactureForm.periodicite_facturation}
+                    onChange={e => setDateFactureForm(f => ({ ...f, periodicite_facturation: e.target.value }))}
+                  >
+                    <option value="">— Sélectionner —</option>
+                    <option value="mensuelle">Mensuelle</option>
+                    <option value="trimestrielle">Trimestrielle</option>
+                    <option value="semestrielle">Semestrielle</option>
+                    <option value="annuelle">Annuelle</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-actions" style={{ marginTop: 24 }}>
+                <button className="btn btn-ghost" onClick={() => setDateFactureModal(false)}>Annuler</button>
+                <button
+                  className="btn btn-primary"
+                  onClick={confirmDateFacture}
+                  disabled={!dateFactureForm.date_premiere_facture || (!ldm.periodicite_facturation && !dateFactureForm.periodicite_facturation)}
+                >
+                  Enregistrer et envoyer
                 </button>
               </div>
             </div>

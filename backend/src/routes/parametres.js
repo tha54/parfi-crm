@@ -44,7 +44,7 @@ router.get('/', verifyToken, async (req, res) => {
 // PUT / — mettre à jour (expert uniquement)
 router.put('/', verifyToken, requireRole('expert'), async (req, res) => {
   const allowed = ['nomCabinet','formeJuridique','siren','numeroOrdre','adresse','codePostal','ville',
-    'telephone','email','siteWeb','iban','bic','tauxTva','prefixeLdm','prefixeDevis','prefixeFacture',
+    'telephone','email','siteWeb','iban','bic','ics','tauxTva','prefixeLdm','prefixeDevis','prefixeFacture',
     'prefixeClients','brevoApiKey','emailExpediteur','nomExpediteur','delaiRelanceLdm','logoUrl',
     'description_cabinet','atouts','engagements','texte_4e_couverture'];
   const jsonCols = new Set(['atouts','engagements']);

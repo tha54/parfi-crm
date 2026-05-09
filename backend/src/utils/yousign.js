@@ -10,7 +10,6 @@
  */
 
 const crypto = require('crypto');
-const pdfParse = require('pdf-parse');
 
 const BASE_URL = () => (process.env.YOUSIGN_BASE_URL || 'https://api-sandbox.yousign.app/v3').replace(/\/$/, '');
 const API_KEY  = () => process.env.YOUSIGN_API_KEY;
@@ -69,27 +68,30 @@ async function uploadDocument(requestId, pdfBuffer, filename) {
 }
 
 // ── Détecter le nombre de pages du PDF ────────────────────────────────────
-async function getPageCount(pdfBuffer) {
+// Uses /Count N from the PDF Pages dictionary (works on all PDF versions)
+function getPageCount(pdfBuffer) {
   try {
-    const data = await pdfParse(pdfBuffer);
-    return data.numpages || 1;
+    const str = pdfBuffer.toString('binary');
+    const m = str.match(/\/Count\s+(\d+)/);
+    return m ? parseInt(m[1], 10) : 1;
   } catch {
     return 1;
   }
 }
 
-// ── Créer une demande de signature complète ────────────────────────────────
+// ── Créer une demande de signature (1 document = 1 requête Yousign) ────────
 /**
  * @param {object} opts
  * @param {Buffer} opts.pdfBuffer       — PDF à signer
- * @param {string} opts.filename        — nom du fichier (ex: DEV-2026-001.pdf)
- * @param {string} opts.requestName     — nom lisible (ex: "Devis DEV-2026-001")
+ * @param {string} opts.filename        — nom du fichier
+ * @param {string} opts.requestName     — nom lisible dans Yousign
  * @param {object} opts.signer          — { email, firstName, lastName }
- * @param {string} [opts.redirectSuccess] — URL de redirection après signature
  * @param {number} [opts.expirationDays=30]
  * @returns {{ requestId, signerId, signingUrl }}
  */
-async function createSignatureRequest({ pdfBuffer, filename, requestName, signer, redirectSuccess, expirationDays = 30 }) {
+async function createSignatureRequest({ pdfBuffer, filename, requestName, signer, expirationDays = 30 }) {
+  const lastPage = getPageCount(pdfBuffer);
+
   // 1 — Créer la demande
   const expDate = new Date();
   expDate.setDate(expDate.getDate() + expirationDays);
@@ -98,54 +100,36 @@ async function createSignatureRequest({ pdfBuffer, filename, requestName, signer
     name:              requestName,
     delivery_mode:     'email',
     timezone:          'Europe/Paris',
-    expiration_date:   expDate.toISOString(),
+    expiration_date:   expDate.toISOString().split('T')[0],
     signers_allowed_to_decline: true,
-    email_notification: {
-      from_name: 'ParFi France',
-    },
   });
 
   const requestId = signReq.id;
 
-  // 2 — Uploader le PDF
+  // 2 — Uploader le document
   const doc = await uploadDocument(requestId, pdfBuffer, filename);
   const documentId = doc.id;
 
-  // 3 — Détecter la dernière page pour positionner la signature
-  const lastPage = await getPageCount(pdfBuffer);
-
-  // Zone signature client : bas-droite de la dernière page (A4 = 595 x 842 points)
-  const sigField = {
-    document_id: documentId,
-    type:        'signature',
-    page:        lastPage,
-    x:           340,
-    y:           740,
-    width:       200,
-    height:       60,
-  };
-
-  // 4 — Ajouter le signataire
-  const signerPayload = {
+  // 3 — Ajouter le signataire
+  // Yousign v3 : coordonnées depuis le coin bas-gauche, y croissant vers le haut
+  const signerResult = await apiRequest('POST', `/signature_requests/${requestId}/signers`, {
     info: {
       first_name: signer.firstName || signer.email.split('@')[0],
-      last_name:  signer.lastName  || '',
+      last_name:  signer.lastName  || '.',
       email:      signer.email,
       locale:     'fr',
     },
     signature_level:                'electronic_signature',
     signature_authentication_mode:  'no_otp',
-    fields: [sigField],
-  };
-  if (redirectSuccess) {
-    signerPayload.redirect_urls = { success: redirectSuccess };
-  }
+    fields: [
+      { document_id: documentId, type: 'signature', page: lastPage, x: 330, y: 90, width: 200, height: 70 },
+    ],
+  });
 
-  const signerResult = await apiRequest('POST', `/signature_requests/${requestId}/signers`, signerPayload);
-  const signerId  = signerResult.id;
+  const signerId   = signerResult.id;
   const signingUrl = signerResult.signature_link || signerResult.signing_url || null;
 
-  // 5 — Activer (envoie l'email Yousign au client)
+  // 4 — Activer (envoie l'email au signataire)
   await apiRequest('POST', `/signature_requests/${requestId}/activate`);
 
   return { requestId, signerId, signingUrl };

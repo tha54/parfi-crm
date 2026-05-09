@@ -137,7 +137,7 @@ export default function ChiffrageConfig({ params, setParams, lignesRapides, setL
               </div>
             );
           })}
-          <div style={{ marginTop: 12, borderTop: forfaitLines.length > 0 ? '1px solid var(--border)' : 'none', paddingTop: forfaitLines.length > 0 ? 12 : 0 }}>
+          <div style={{ marginTop: 12, borderTop: lignesRapides.length > 0 ? '1px solid var(--border)' : 'none', paddingTop: lignesRapides.length > 0 ? 12 : 0 }}>
             <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 8 }}>Ajouter une ligne</p>
             <div className="form-group">
               <input className="form-control" placeholder="Libellé"

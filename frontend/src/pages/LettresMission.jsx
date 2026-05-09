@@ -49,17 +49,6 @@ export default function LettresMission() {
 
   const openCreate = () => setShowHonorairesModal(true);
 
-  const changeStatut = async (l, statut) => {
-    try { await api.put(`/lettres-mission/${l.id}`, { statut }); await reload(); }
-    catch { alert('Erreur'); }
-  };
-
-  const del = async (l) => {
-    if (!confirm(`Supprimer la lettre ${l.numero} ?`)) return;
-    try { await api.delete(`/lettres-mission/${l.id}`); await reload(); }
-    catch { alert('Erreur'); }
-  };
-
   const filtered = lettres.filter(l => {
     const q = search.toLowerCase();
     const matchSearch = !q || l.numero?.toLowerCase().includes(q) || l.client_nom?.toLowerCase().includes(q) || TYPES_MISSION[l.typeMission]?.toLowerCase().includes(q);
@@ -165,7 +154,6 @@ export default function LettresMission() {
                       <th>Honoraires HT</th>
                       <th>Début</th>
                       <th>Fin</th>
-                      {canEdit && <th>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -182,18 +170,6 @@ export default function LettresMission() {
                         <td><strong>{fmt(l.montantHonorairesHT)}</strong></td>
                         <td>{l.dateDebut ? new Date(l.dateDebut).toLocaleDateString('fr-FR') : '—'}</td>
                         <td>{l.dateFin ? new Date(l.dateFin).toLocaleDateString('fr-FR') : <span className="text-muted">Indéterminée</span>}</td>
-                        {canEdit && (
-                          <td>
-                            <div className="td-actions">
-                              <select className="form-control" style={{ width: 130, fontSize: 12, padding: '4px 8px' }}
-                                value={l.statut} onChange={e => changeStatut(l, e.target.value)}>
-                                {Object.entries(STATUTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                              </select>
-                              <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/lettres-mission/${l.id}`)}>✏️</button>
-                              {user?.role === 'expert' && <button className="btn btn-danger btn-sm" onClick={() => del(l)}>🗑</button>}
-                            </div>
-                          </td>
-                        )}
                       </tr>
                     ))}
                   </tbody>

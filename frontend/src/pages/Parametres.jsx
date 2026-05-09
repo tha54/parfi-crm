@@ -42,7 +42,7 @@ export default function Parametres() {
     nom: '', adresse: '', ville: '', codePostal: '', pays: 'France',
     telephone: '', email: '', siteWeb: '', siret: '',
     numeroOrdre: '', assuranceRCP: '',
-    tvaTaux: '20', mentionsLegales: '', iban: '', bic: '',
+    tvaTaux: '20', mentionsLegales: '', iban: '', bic: '', ics: '',
     logoUrl: '',
     couleurPrimaire: '#0f1f4b', couleurSecondaire: '#00b4d8',
     emailSignature: '', relanceAutomatique: false, delaiRelance1: 15, delaiRelance2: 30,
@@ -303,6 +303,9 @@ export default function Parametres() {
             <div className="form-row">
               <F form={form} setForm={setForm} label="IBAN" name="iban" placeholder="FR76 XXXX XXXX XXXX XXXX XXXX XXX" />
               <F form={form} setForm={setForm} label="BIC" name="bic" placeholder="BNPAFRPPXXX" />
+            </div>
+            <div className="form-row">
+              <F form={form} setForm={setForm} label="Identifiant Créancier SEPA (ICS)" name="ics" placeholder="FR12ZZZ123456" />
             </div>
             <F form={form} setForm={setForm} label="Mentions légales" name="mentionsLegales" rows={3} placeholder="Mentions légales figurant sur les factures et devis…" />
             <F form={form} setForm={setForm} label="Signature email" name="emailSignature" rows={3} placeholder="Cordialement,\nParFi France…" />

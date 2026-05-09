@@ -109,6 +109,7 @@ export default function DevisDetail() {
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [pdfReady, setPdfReady] = useState(false);
+  const [evenements, setEvenements] = useState([]);
 
   const canEdit = ['expert', 'chef_mission'].includes(user?.role);
 
@@ -118,7 +119,12 @@ export default function DevisDetail() {
       .catch(() => navigate('/devis'))
       .finally(() => setLoading(false));
 
-  useEffect(() => { load(); }, [id]);
+  const loadEvenements = () =>
+    api.get(`/devis/evenements/${id}`)
+      .then(r => setEvenements(r.data || []))
+      .catch(() => {});
+
+  useEffect(() => { load(); loadEvenements(); }, [id]);
   useEffect(() => {
     if (!devis) return;
     if (devis.pdf_path) { setPdfReady(true); return; }
@@ -130,7 +136,7 @@ export default function DevisDetail() {
 
   const action = async (fn, successMsg) => {
     setBusy(true); setMsg(null);
-    try { await fn(); setMsg({ ok: true, text: successMsg }); await load(); }
+    try { await fn(); setMsg({ ok: true, text: successMsg }); await load(); loadEvenements(); }
     catch (e) { setMsg({ ok: false, text: e.response?.data?.message || 'Erreur' }); }
     finally { setBusy(false); }
   };
@@ -157,7 +163,7 @@ export default function DevisDetail() {
       } else {
         setMsg({ ok: true, text: data.message || 'Devis envoyé' });
       }
-      await load();
+      await load(); loadEvenements();
     } catch (e) { setMsg({ ok: false, text: e.response?.data?.message || 'Erreur' }); }
     finally { setBusy(false); }
   };
@@ -295,16 +301,16 @@ export default function DevisDetail() {
               ? '✍️ Signature électronique en cours (Yousign)'
               : 'Envoyé — en attente du devis signé du client'}
             description={devis.yousign_request_id
-              ? `Le document a été envoyé via Yousign pour signature électronique. La LDM sera créée automatiquement dès que le client aura signé en ligne. Aucune action manuelle requise.`
+              ? `Le document a été envoyé via Yousign pour signature électronique. La LDM sera créée automatiquement dès que le client aura signé en ligne.`
               : "Le devis a été envoyé au client par email. Tant que tu n'as pas reçu le devis signé en retour, la lettre de mission ne peut pas être créée."}
-            primary={devis.yousign_request_id ? null : {
+            primary={{
               label: '✓ Devis signé reçu — créer la LDM',
               onClick: () => setAcceptConfirmModal(true),
               disabled: busy,
               color: '#00897b',
             }}
             secondaries={[
-              ...(devis.yousign_request_id ? [] : [{ label: '↻ Renvoyer par email', onClick: () => envoyer(), disabled: busy }]),
+              { label: '↻ Renvoyer', onClick: () => envoyer(), disabled: busy },
               { label: '✗ Refusé', onClick: refuser, disabled: busy, color: '#e74c3c' },
             ]}
             color="#f59e0b"
@@ -435,6 +441,68 @@ export default function DevisDetail() {
                 <div className="card-body">
                   {devis.notesClient && <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Notes client</div><div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{devis.notesClient}</div></div>}
                   {devis.notesInternes && <div><div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Notes internes</div><div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text-muted)' }}>{devis.notesInternes}</div></div>}
+                </div>
+              </div>
+            )}
+
+            {/* Journal des événements */}
+            {evenements.length > 0 && (
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">Journal des événements</span>
+                  <span className="text-muted text-sm">{evenements.length} événement{evenements.length > 1 ? 's' : ''}</span>
+                </div>
+                <div className="card-body" style={{ paddingTop: 8, paddingBottom: 8 }}>
+                  {evenements.map((ev, i) => {
+                    const evLabels = {
+                      envoi: 'Envoi au client',
+                      renvoi: 'Renvoi au client',
+                      signature_yousign: 'Signé via Yousign',
+                      signature_manuelle: 'Signé manuellement',
+                      refus: 'Refusé',
+                    };
+                    const evIcons = {
+                      envoi: '📤',
+                      renvoi: '📤',
+                      signature_yousign: '✍️',
+                      signature_manuelle: '✍️',
+                      refus: '✗',
+                    };
+                    const evColors = {
+                      envoi: '#f59e0b',
+                      renvoi: '#f59e0b',
+                      signature_yousign: '#059669',
+                      signature_manuelle: '#059669',
+                      refus: '#dc2626',
+                    };
+                    const color = evColors[ev.type] || '#6b7280';
+                    return (
+                      <div key={ev.id || i} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: i < evenements.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                        <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: '50%', background: color + '18', border: `1px solid ${color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+                          {evIcons[ev.type] || '•'}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 600, color }}>{evLabels[ev.type] || ev.type?.replace(/_/g, ' ')}</span>
+                              {ev.acteur_nom && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 6 }}>par {ev.acteur_nom}</span>}
+                            </div>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                              {new Date(ev.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          {ev.commentaire && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{ev.commentaire}</div>}
+                          {ev.statut_avant && ev.statut_apres && (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                              <span style={{ color: STATUT_COLORS[ev.statut_avant] }}>{STATUTS[ev.statut_avant] || ev.statut_avant}</span>
+                              <span style={{ margin: '0 4px' }}>→</span>
+                              <span style={{ color: STATUT_COLORS[ev.statut_apres], fontWeight: 600 }}>{STATUTS[ev.statut_apres] || ev.statut_apres}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

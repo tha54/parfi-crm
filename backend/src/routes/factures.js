@@ -38,7 +38,7 @@ router.get('/', verifyToken, async (req, res) => {
        LEFT JOIN devis d  ON f.devisId = d.id
        LEFT JOIN devis dlm ON lm.devis_id = dlm.id
        WHERE ${where.join(' AND ')}
-       ORDER BY f.mois_facturation DESC, f.createdAt DESC`,
+       ORDER BY COALESCE(f.dateEmission, f.mois_facturation) ASC, f.createdAt ASC`,
       params
     );
     res.json(rows);

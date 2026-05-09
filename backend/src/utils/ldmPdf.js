@@ -93,12 +93,15 @@ async function genererEtSauvegarderPdfLDM(ldmId, signataire_id) {
       doc.moveDown(0.7);
     }
 
+    const PERIO = { mensuelle: 'Mensuelle', trimestrielle: 'Trimestrielle', semestrielle: 'Semestrielle', annuelle: 'Annuelle', unique: 'Unique' };
     row('Client',            ldm.client_nom || '—');
     if (ldm.client_siren) row('SIREN client', ldm.client_siren);
     row('Type de mission',   TYPE_MISSION_LABEL[ldm.typeMission] || ldm.typeMission || '—');
-    row('Date de début',     fmtDate(ldm.dateDebut));
+    row('Début de mission',  fmtDate(ldm.dateDebut));
     row('Date de fin',       ldm.dateFin ? fmtDate(ldm.dateFin) : 'Reconduction tacite');
     row('Honoraires HT/an',  fmtMontant(ldm.montantHonorairesHT || ldm.montant_annuel_ht));
+    if (ldm.date_premiere_facture) row('Date de 1ère facturation', fmtDate(ldm.date_premiere_facture));
+    if (ldm.periodicite_facturation) row('Périodicité de facturation', PERIO[ldm.periodicite_facturation] || ldm.periodicite_facturation);
     if (ldm.collaborateur_nom) row('Collaborateur affecté', ldm.collaborateur_nom);
 
     // ── Objet de la mission ───────────────────────────────────────────────────────

@@ -1,6 +1,60 @@
 const cron = require('node-cron');
 const pool = require('./config/db');
 const { syncClient } = require('./routes/powens');
+const { genererFacturesDepuisLDM } = require('./utils/facturation');
+const { injecterTachesLDM } = require('./routes/lettres');
+const ldmService = require('./services/ldmService');
+
+// Réutilise la même logique d'activation que le webhook
+async function activerMissionSiComplete(ldmId) {
+  const [[ldm]] = await pool.query(
+    `SELECT id, numero, statut, collaborateur_id, chef_mission_id
+     FROM lettres_mission WHERE id = ? AND yousign_status = 'done' AND statut = 'envoyee'`,
+    [ldmId]
+  );
+  if (!ldm) return;
+
+  const [mandatsYousign] = await pool.query(
+    `SELECT signe FROM mandats WHERE ldm_id = ? AND yousign_request_id IS NOT NULL`,
+    [ldmId]
+  );
+  const tousSignes = mandatsYousign.length === 0 || mandatsYousign.every(m => m.signe === 1);
+  if (!tousSignes) {
+    console.log(`[scheduler] LDM ${ldm.numero} : en attente des mandats (${mandatsYousign.filter(m => !m.signe).length} restant(s))`);
+    return;
+  }
+
+  let tachesCreees = 0, facturesCreees = 0;
+  try {
+    await ldmService.transitionner(ldmId, 'signer', 'expert', null, 'Yousign polling – tous documents signés', { skipUrlCheck: true });
+  } catch (e) {
+    console.error(`[scheduler] LDM ${ldm.numero} transition:`, e.message);
+  }
+  try {
+    tachesCreees = await injecterTachesLDM(ldmId, ldm.collaborateur_id || null, ldm.chef_mission_id || null, null);
+  } catch (e) {
+    console.error(`[scheduler] injecterTaches LDM ${ldm.numero}:`, e.message);
+  }
+  try {
+    const result = await genererFacturesDepuisLDM(ldmId);
+    facturesCreees = result?.factureIds?.length || 0;
+  } catch (e) {
+    console.error(`[scheduler] genererFactures LDM ${ldm.numero}:`, e.message);
+  }
+
+  const [experts] = await pool.query(
+    `SELECT id FROM utilisateurs WHERE role IN ('expert','chef_mission') AND actif = 1`
+  ).catch(() => [[]]);
+  for (const u of experts) {
+    await pool.query(
+      `INSERT INTO notifications (utilisateur_id, type, titre, message, lien, lue) VALUES (?,?,?,?,?,0)`,
+      [u.id, 'ldm_signee', `LDM signée : ${ldm.numero}`,
+       `La lettre de mission ${ldm.numero} et ses mandats ont tous été signés. ${tachesCreees} tâche(s) planifiée(s), ${facturesCreees} facture(s) générée(s).`,
+       `/lettres-mission/${ldmId}`]
+    ).catch(() => {});
+  }
+  console.log(`[scheduler] LDM ${ldm.numero} activée — ${tachesCreees} tâches, ${facturesCreees} factures`);
+}
 
 async function executeAutomationTrigger(declencheur, clientId) {
   try {
@@ -133,7 +187,155 @@ function startScheduler() {
     }
   });
 
-  console.log('[scheduler] Démarré — tache_retard @ 08:00, facture_impayee_30j @ 08:05, figeage_temps @ 02:00, powens_sync @ 03:30');
+  // Every hour — poll Yousign for pending signatures (fallback if webhook misses)
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const yousign = require('./utils/yousign');
+      if (!yousign.isConfigured()) return;
+
+      // Devis en attente
+      const [devisList] = await pool.query(
+        `SELECT id, numero, statut, opportunite_id, yousign_request_id
+         FROM devis WHERE yousign_status = 'pending' AND yousign_request_id IS NOT NULL`
+      );
+      for (const d of devisList) {
+        try {
+          const remote = await yousign.getSignatureRequestStatus(d.yousign_request_id);
+          if (remote.status === 'done' && d.statut === 'envoye') {
+            await pool.query(
+              `UPDATE devis SET statut = 'accepte', yousign_status = 'done', dateSignature = NOW(), updatedAt = NOW() WHERE id = ?`,
+              [d.id]
+            );
+            // Log événement signature Yousign (polling)
+            await pool.query(
+              `INSERT INTO devis_evenements (devis_id, type, acteur_id, acteur_nom, statut_avant, statut_apres, commentaire)
+               VALUES (?, 'signature_yousign', NULL, 'Yousign', 'envoye', 'accepte', 'Signature électronique Yousign reçue')`,
+              [d.id]
+            ).catch(e => console.error('[scheduler] log devis evenement:', e.message));
+            if (d.opportunite_id) {
+              await pool.query(
+                `UPDATE opportunites SET statut = 'devis_fait', probabilite = 80, updatedAt = NOW() WHERE id = ?`,
+                [d.opportunite_id]
+              ).catch(() => {});
+            }
+            const [experts] = await pool.query(
+              `SELECT id FROM utilisateurs WHERE role IN ('expert','chef_mission') AND actif = 1`
+            ).catch(() => [[]]);
+            for (const u of experts) {
+              await pool.query(
+                `INSERT INTO notifications (utilisateur_id, type, titre, message, lien, lue) VALUES (?,?,?,?,?,0)`,
+                [u.id, 'devis_signe', `Devis signé : ${d.numero}`,
+                 `Le devis ${d.numero} a été signé via Yousign. Vous pouvez créer la lettre de mission.`,
+                 `/devis/${d.id}`]
+              ).catch(() => {});
+            }
+            console.log(`[scheduler] Yousign polling: devis ${d.numero} accepté`);
+          } else if (remote.status === 'declined') {
+            await pool.query(
+              `UPDATE devis SET statut = 'refuse', yousign_status = 'declined', updatedAt = NOW() WHERE id = ?`,
+              [d.id]
+            );
+            console.log(`[scheduler] Yousign polling: devis ${d.numero} refusé`);
+          } else if (remote.status === 'expired') {
+            await pool.query(`UPDATE devis SET yousign_status = 'expired' WHERE id = ?`, [d.id]);
+          }
+        } catch (e) {
+          console.error(`[scheduler] Yousign poll devis ${d.numero}:`, e.message);
+        }
+      }
+
+      // LDM en attente
+      const [ldmList] = await pool.query(
+        `SELECT id, numero, statut, devis_id, yousign_request_id, collaborateur_id, chef_mission_id
+         FROM lettres_mission WHERE yousign_status = 'pending' AND yousign_request_id IS NOT NULL`
+      );
+      for (const l of ldmList) {
+        try {
+          const remote = await yousign.getSignatureRequestStatus(l.yousign_request_id);
+          if (remote.status === 'done' && l.statut === 'envoyee') {
+            await pool.query(
+              `UPDATE lettres_mission SET yousign_status = 'done' WHERE id = ?`, [l.id]
+            );
+            await activerMissionSiComplete(l.id);
+          } else if (remote.status === 'declined') {
+            await pool.query(
+              `UPDATE lettres_mission SET yousign_status = 'declined', statut = 'annulee', updatedAt = NOW() WHERE id = ?`,
+              [l.id]
+            );
+            if (l.devis_id) {
+              await pool.query(
+                `UPDATE devis SET verrouille = 0, ldm_generee_id = NULL WHERE id = ?`, [l.devis_id]
+              ).catch(() => {});
+            }
+            console.log(`[scheduler] Yousign polling: LDM ${l.numero} refusée`);
+          } else if (remote.status === 'expired') {
+            await pool.query(`UPDATE lettres_mission SET yousign_status = 'expired' WHERE id = ?`, [l.id]);
+          }
+        } catch (e) {
+          console.error(`[scheduler] Yousign poll LDM ${l.numero}:`, e.message);
+        }
+      }
+      // Mandats en attente de signature
+      const [mandatList] = await pool.query(
+        `SELECT m.id, m.type, m.ldm_id, m.yousign_request_id,
+                lm.numero AS ldm_numero, lm.client_id
+         FROM mandats m
+         JOIN lettres_mission lm ON lm.id = m.ldm_id
+         WHERE m.signe = 0 AND m.yousign_request_id IS NOT NULL`
+      ).catch(() => [[]]);
+
+      for (const m of mandatList) {
+        try {
+          const remote = await yousign.getSignatureRequestStatus(m.yousign_request_id);
+          if (remote.status === 'done') {
+            await pool.query(
+              `UPDATE mandats SET signe = 1, date_signature = CURDATE() WHERE id = ?`, [m.id]
+            );
+
+            // Archiver le PDF signé dans la GED
+            try {
+              const fs   = require('fs');
+              const path = require('path');
+              const docId = remote.documents?.[0]?.id;
+              if (docId) {
+                const signedBuf = await yousign.downloadSignedDocument(m.yousign_request_id, docId);
+                const DOCS_BASE = '/opt/parfi-data/documents';
+                const year = new Date().getFullYear();
+                const dir  = path.join(DOCS_BASE, String(m.client_id || 'general'), String(year));
+                fs.mkdirSync(dir, { recursive: true });
+                const TYPE_LABEL = { prelevement: 'Mandat_SEPA', impots: 'Procuration_Fiscale', urssaf: 'Procuration_Sociale' };
+                const fname = `${Date.now()}_${TYPE_LABEL[m.type] || 'Mandat'}_signe.pdf`;
+                const fpath = path.join(dir, fname);
+                fs.writeFileSync(fpath, signedBuf);
+
+                await pool.query(
+                  `INSERT INTO documents (nom, description, chemin, type_document, type, lettreMissionId, client_id, taille, mimeType)
+                   VALUES (?, ?, ?, 'mandat', 'mandat', ?, ?, ?, 'application/pdf')`,
+                  [fname, `${TYPE_LABEL[m.type] || 'Mandat'} signé — LDM ${m.ldm_numero}`,
+                   fpath, m.ldm_id, m.client_id || null, signedBuf.length]
+                );
+                await pool.query(`UPDATE mandats SET chemin_pdf_signe = ? WHERE id = ?`, [fpath, m.id]);
+              }
+            } catch (archErr) {
+              console.error(`[scheduler] archivage mandat ${m.type}:`, archErr.message);
+            }
+
+            console.log(`[scheduler] Mandat ${m.type} (LDM ${m.ldm_numero}) signé et archivé`);
+            await activerMissionSiComplete(m.ldm_id);
+          } else if (remote.status === 'expired') {
+            console.log(`[scheduler] Mandat ${m.type} (LDM ${m.ldm_numero}) expiré`);
+          }
+        } catch (e) {
+          console.error(`[scheduler] Yousign poll mandat ${m.type} (LDM ${m.ldm_numero}):`, e.message);
+        }
+      }
+
+    } catch (e) {
+      console.error('[scheduler] Yousign polling error:', e.message);
+    }
+  });
+
+  console.log('[scheduler] Démarré — tache_retard @ 08:00, facture_impayee_30j @ 08:05, figeage_temps @ 02:00, powens_sync @ 03:30, yousign_poll @ toutes les heures');
 }
 
 module.exports = { startScheduler };

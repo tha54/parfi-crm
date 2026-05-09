@@ -10,6 +10,43 @@ const ldmService = require('../services/ldmService');
 
 const PDF_DIR = path.join(__dirname, '..', '..', 'uploads', 'devis');
 
+// ── Migration automatique : table devis_evenements ────────────────────────────
+;(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS devis_evenements (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        devis_id INT NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        acteur_id INT DEFAULT NULL,
+        acteur_nom VARCHAR(100) DEFAULT NULL,
+        statut_avant VARCHAR(30) DEFAULT NULL,
+        statut_apres VARCHAR(30) DEFAULT NULL,
+        commentaire TEXT DEFAULT NULL,
+        metadata JSON DEFAULT NULL,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX (devis_id)
+      )
+    `);
+    console.log('[devis] Table devis_evenements prête');
+  } catch (e) {
+    console.error('[devis] migration devis_evenements:', e.message);
+  }
+})();
+
+// ── Helper : log un événement dans devis_evenements ───────────────────────────
+async function logDevisEvenement(devisId, type, acteurId, acteurNom, statutAvant, statutApres, commentaire, metadata) {
+  try {
+    await pool.query(
+      `INSERT INTO devis_evenements (devis_id, type, acteur_id, acteur_nom, statut_avant, statut_apres, commentaire, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [devisId, type, acteurId || null, acteurNom || null, statutAvant || null, statutApres || null, commentaire || null, metadata ? JSON.stringify(metadata) : null]
+    );
+  } catch (e) {
+    console.error('[devis] logDevisEvenement:', e.message);
+  }
+}
+
 // Lookup map for raw INSEE nature-juridique codes stored in prospects.forme_juridique
 const INSEE_NATURES = {
   '1000': 'Entrepreneur individuel', '5120': 'EURL', '5202': 'SNC',
@@ -703,6 +740,20 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', error: e.message }); }
 });
 
+// ── GET /evenements/:id ───────────────────────────────────────────────────────
+// IMPORTANT : cette route doit être déclarée AVANT GET /:id pour éviter qu'Express
+// n'interprète "evenements" comme un id.
+
+router.get('/evenements/:id', verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM devis_evenements WHERE devis_id = ? ORDER BY createdAt ASC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ message: 'Erreur serveur', error: e.message }); }
+});
+
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 
 router.get('/:id', verifyToken, async (req, res) => {
@@ -827,7 +878,9 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
       [req.params.id]
     );
     if (!d) return res.status(404).json({ message: 'Devis introuvable' });
-    if (d.statut !== 'brouillon') return res.status(400).json({ message: 'Ce devis a déjà été envoyé' });
+    if (!['brouillon', 'envoye'].includes(d.statut)) return res.status(400).json({ message: `Impossible d'envoyer un devis en statut "${d.statut}"` });
+
+    const isResend = d.statut === 'envoye';
 
     // ── Check email before touching status ──────────────────────────────────
     const destinataire = req.body.emailOverride || d.client_email || d.prospect_email;
@@ -835,18 +888,23 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
       return res.json({ missingEmail: true, nomContact: d.display_nom || '' });
     }
 
-    // ── Update status ───────────────────────────────────────────────────────
-    await pool.query(
-      `UPDATE devis SET statut = 'envoye', dateEmission = COALESCE(dateEmission, NOW()) WHERE id = ?`,
-      [req.params.id]
-    );
-    if (d.opportunite_id) {
-      pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE id = ?`, [d.opportunite_id]).catch(() => {});
-    } else if (d.prospect_id) {
-      pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE prospect_id = ? AND statut NOT IN ('gagne','perdu')`, [d.prospect_id]).catch(() => {});
-    } else if (d.client_id) {
-      pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
+    // ── Update status (premier envoi uniquement) ────────────────────────────
+    if (!isResend) {
+      await pool.query(
+        `UPDATE devis SET statut = 'envoye', dateEmission = COALESCE(dateEmission, NOW()) WHERE id = ?`,
+        [req.params.id]
+      );
+      if (d.opportunite_id) {
+        pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE id = ?`, [d.opportunite_id]).catch(() => {});
+      } else if (d.prospect_id) {
+        pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE prospect_id = ? AND statut NOT IN ('gagne','perdu')`, [d.prospect_id]).catch(() => {});
+      } else if (d.client_id) {
+        pool.query(`UPDATE opportunites SET statut = 'negociation', probabilite = 50, updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
+      }
     }
+
+    // ── Préparer l'acteur pour les logs d'événements ────────────────────────
+    const acteurNomEnvoi = req.user ? `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() : null;
 
     // ── Send email ──────────────────────────────────────────────────────────
     if (destinataire) {
@@ -936,9 +994,11 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
         const yousign = require('../utils/yousign');
         if (yousign.isConfigured()) {
           try {
-            const nameParts = (d.contact_prenom || d.contact_nom)
-              ? { firstName: d.contact_prenom || nomClient, lastName: d.contact_nom || '' }
-              : { firstName: nomClient, lastName: '' };
+            const fullName   = nomClient || '';
+            const nameParts = {
+              firstName: d.contact_prenom || fullName.split(' ')[0] || '.',
+              lastName:  d.contact_nom    || fullName.split(' ').slice(1).join(' ') || '.',
+            };
 
             const { requestId, signerId, signingUrl } = await yousign.createSignatureRequest({
               pdfBuffer,
@@ -952,6 +1012,15 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
             await pool.query(
               `UPDATE devis SET yousign_request_id = ?, yousign_signer_id = ?, yousign_signing_url = ?, yousign_status = 'pending' WHERE id = ?`,
               [requestId, signerId, signingUrl, d.id]
+            );
+
+            await logDevisEvenement(
+              d.id,
+              isResend ? 'renvoi' : 'envoi',
+              req.user?.id, acteurNomEnvoi,
+              d.statut, 'envoye',
+              `Envoyé à ${destinataire} via Yousign`,
+              { yousign: true, requestId }
             );
 
             return res.json({
@@ -1006,6 +1075,14 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert', 'chef_mission'), 
             htmlContent,
             attachments: [{ base64: pdfBuffer.toString('base64'), filename: `${d.numero}.pdf` }],
           });
+          await logDevisEvenement(
+            d.id,
+            isResend ? 'renvoi' : 'envoi',
+            req.user?.id, acteurNomEnvoi,
+            d.statut, 'envoye',
+            `Envoyé à ${destinataire} par email`,
+            null
+          );
           return res.json({ message: 'Devis envoyé par email', statut: 'envoye', email: destinataire });
         } catch (emailErr) {
           console.error('[envoyer devis] email error:', emailErr.message);
@@ -1030,7 +1107,7 @@ router.post('/:id/accepter', verifyToken, requireRole('expert', 'chef_mission'),
   try {
     const [[d]] = await pool.query('SELECT * FROM devis WHERE id = ?', [req.params.id]);
     if (!d) return res.status(404).json({ message: 'Devis introuvable' });
-    await pool.query(`UPDATE devis SET statut = 'accepte' WHERE id = ?`, [req.params.id]);
+    await pool.query(`UPDATE devis SET statut = 'accepte', dateSignature = NOW() WHERE id = ?`, [req.params.id]);
     if (d.opportunite_id) {
       pool.query(`UPDATE opportunites SET statut = 'devis_envoye', probabilite = 70, updatedAt = NOW() WHERE id = ?`, [d.opportunite_id]).catch(() => {});
     } else if (d.prospect_id) {
@@ -1039,8 +1116,16 @@ router.post('/:id/accepter', verifyToken, requireRole('expert', 'chef_mission'),
       pool.query(`UPDATE opportunites SET statut = 'devis_envoye', probabilite = 70, updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
     }
 
-    // Générer la LDM via le service (idempotent + snapshot + audit)
     const acteurNom = req.user ? `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() : null;
+    await logDevisEvenement(
+      d.id, 'signature_manuelle',
+      req.user?.id, acteurNom,
+      'envoye', 'accepte',
+      'Signature manuelle enregistrée',
+      null
+    );
+
+    // Générer la LDM via le service (idempotent + snapshot + audit)
     const { ldm } = await ldmService.genererDepuisDevis(d.id, req.user?.id, acteurNom);
 
     res.json({ message: 'Devis signé — LDM créée', statut: 'accepte', ldmId: ldm.id, ldmNumero: ldm.numero });
@@ -1061,6 +1146,14 @@ router.post('/:id/refuser', verifyToken, requireRole('expert', 'chef_mission'), 
     } else if (d.client_id) {
       pool.query(`UPDATE opportunites SET statut = 'perdu', updatedAt = NOW() WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`, [d.client_id]).catch(() => {});
     }
+    const acteurNomRefus = req.user ? `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() : null;
+    await logDevisEvenement(
+      d.id, 'refus',
+      req.user?.id, acteurNomRefus,
+      'envoye', 'refuse',
+      req.body?.motif || null,
+      null
+    );
     res.json({ message: 'Devis refusé', statut: 'refuse' });
   } catch (e) { res.status(500).json({ message: 'Erreur serveur', error: e.message }); }
 });

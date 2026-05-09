@@ -129,7 +129,7 @@ async function buildSnapshotClient(clientId, prospectId) {
   if (clientId) {
     const [[c]] = await pool.query(
       `SELECT id, nom, siren, adresse, code_postal, ville, forme_juridique,
-              email_dirigeant, telephone, portal_email, capital
+              email_dirigeant, telephone_dirigeant, portal_email, capital
        FROM clients WHERE id = ?`, [clientId]
     );
     if (c) return {
@@ -137,7 +137,7 @@ async function buildSnapshotClient(clientId, prospectId) {
       adresse: c.adresse || '', codePostal: c.code_postal || '', ville: c.ville || '',
       formeJuridique: c.forme_juridique || '', capital: c.capital || null,
       email: c.email_dirigeant || c.portal_email || '',
-      telephone: c.telephone || '',
+      telephone: c.telephone_dirigeant || '',
     };
   }
   if (prospectId) {

@@ -16,6 +16,8 @@ const router   = express.Router();
 const pool     = require('../config/db');
 const yousign  = require('../utils/yousign');
 const ldmService = require('../services/ldmService');
+const { genererFacturesDepuisLDM } = require('../utils/facturation');
+const { injecterTachesLDM } = require('./lettres');
 
 // ─── Migration : colonnes yousign sur devis + lettres_mission ─────────────
 ;(async () => {
@@ -41,6 +43,62 @@ const ldmService = require('../services/ldmService');
     }
   }
 })().catch(e => console.error('[signatures] migration:', e.message));
+
+// ── Activer la mission si LDM + tous les mandats Yousign sont signés ──────
+async function activerMissionSiComplete(ldmId) {
+  // 1. Vérifier que la LDM elle-même est marquée done
+  const [[ldm]] = await pool.query(
+    `SELECT id, numero, statut, collaborateur_id, chef_mission_id, devis_id
+     FROM lettres_mission WHERE id = ? AND yousign_status = 'done' AND statut = 'envoyee'`,
+    [ldmId]
+  );
+  if (!ldm) return; // LDM pas encore signée ou déjà activée
+
+  // 2. Vérifier que tous les mandats envoyés via Yousign sont signés
+  const [mandatsYousign] = await pool.query(
+    `SELECT signe FROM mandats WHERE ldm_id = ? AND yousign_request_id IS NOT NULL`,
+    [ldmId]
+  );
+  const tousSignes = mandatsYousign.length === 0 || mandatsYousign.every(m => m.signe === 1);
+  if (!tousSignes) {
+    console.log(`[yousign] LDM ${ldm.numero} : en attente des mandats (${mandatsYousign.filter(m => !m.signe).length} restant(s))`);
+    return;
+  }
+
+  // 3. Tout est signé → activer la mission
+  let tachesCreees = 0, facturesCreees = 0;
+  try {
+    await ldmService.transitionner(ldmId, 'signer', 'expert', null, 'Yousign – tous documents signés', { skipUrlCheck: true });
+  } catch (e) {
+    console.error(`[yousign] LDM ${ldm.numero} transition erreur:`, e.message);
+  }
+
+  try {
+    tachesCreees = await injecterTachesLDM(ldmId, ldm.collaborateur_id || null, ldm.chef_mission_id || null, null);
+  } catch (e) {
+    console.error(`[yousign] LDM ${ldm.numero} injection tâches erreur:`, e.message);
+  }
+
+  try {
+    const result = await genererFacturesDepuisLDM(ldmId);
+    facturesCreees = result?.factureIds?.length || 0;
+  } catch (e) {
+    console.error(`[yousign] LDM ${ldm.numero} génération factures erreur:`, e.message);
+  }
+
+  const [experts] = await pool.query(
+    `SELECT id FROM utilisateurs WHERE role IN ('expert','chef_mission') AND actif = 1`
+  ).catch(() => [[]]);
+  for (const u of experts) {
+    await pool.query(
+      `INSERT INTO notifications (utilisateur_id, type, titre, message, lien, lue) VALUES (?,?,?,?,?,0)`,
+      [u.id, 'ldm_signee', `LDM signée : ${ldm.numero}`,
+       `La lettre de mission ${ldm.numero} et ses mandats ont tous été signés. ${tachesCreees} tâche(s) planifiée(s), ${facturesCreees} facture(s) générée(s).`,
+       `/lettres-mission/${ldmId}`]
+    ).catch(() => {});
+  }
+  console.log(`[yousign] LDM ${ldm.numero} activée — ${tachesCreees} tâches, ${facturesCreees} factures`);
+}
 
 // ─── POST /webhook — réception des événements Yousign ────────────────────
 // Note : rawBody est fourni par le middleware express.raw() enregistré dans server.js
@@ -71,18 +129,32 @@ router.post('/webhook', async (req, res) => {
     );
 
     const [[ldm]] = await pool.query(
-      `SELECT id, numero, statut, client_id, prospect_id, devis_id
+      `SELECT id, numero, statut, client_id, prospect_id, devis_id, collaborateur_id, chef_mission_id
        FROM lettres_mission WHERE yousign_request_id = ? LIMIT 1`,
       [requestId]
     );
+
+    // Mandat éventuel
+    const [[mandat]] = await pool.query(
+      `SELECT m.id, m.type, m.ldm_id, lm.numero AS ldm_numero, lm.client_id
+       FROM mandats m JOIN lettres_mission lm ON lm.id = m.ldm_id
+       WHERE m.yousign_request_id = ? LIMIT 1`,
+      [requestId]
+    ).catch(() => [[null]]);
 
     if (eventName === 'signature_request.done') {
       // ── Devis signé ─────────────────────────────────────────────────
       if (devis && devis.statut === 'envoye') {
         await pool.query(
-          `UPDATE devis SET statut = 'accepte', yousign_status = 'done', updatedAt = NOW() WHERE id = ?`,
+          `UPDATE devis SET statut = 'accepte', yousign_status = 'done', dateSignature = NOW(), updatedAt = NOW() WHERE id = ?`,
           [devis.id]
         );
+        // Log événement signature Yousign
+        await pool.query(
+          `INSERT INTO devis_evenements (devis_id, type, acteur_id, acteur_nom, statut_avant, statut_apres, commentaire)
+           VALUES (?, 'signature_yousign', NULL, 'Yousign', 'envoye', 'accepte', 'Signature électronique Yousign reçue')`,
+          [devis.id]
+        ).catch(e => console.error('[signatures] log devis evenement:', e.message));
 
         // Pipeline
         if (devis.opportunite_id) {
@@ -113,35 +185,61 @@ router.post('/webhook', async (req, res) => {
       // ── LDM signée ───────────────────────────────────────────────────
       if (ldm && ldm.statut === 'envoyee') {
         await pool.query(
-          `UPDATE lettres_mission SET yousign_status = 'done' WHERE id = ?`,
-          [ldm.id]
+          `UPDATE lettres_mission SET yousign_status = 'done' WHERE id = ?`, [ldm.id]
         );
+        console.log(`[yousign] LDM ${ldm.numero} signée — vérification des mandats...`);
+        await activerMissionSiComplete(ldm.id);
+      }
 
-        // Activer via machine à états (envoyee → signee → active)
+      // ── Mandat signé ─────────────────────────────────────────────────
+      if (mandat && !devis && !ldm) {
+        await pool.query(
+          `UPDATE mandats SET signe = 1, date_signature = CURDATE() WHERE id = ?`,
+          [mandat.id]
+        );
+        console.log(`[yousign] Mandat ${mandat.type} (LDM ${mandat.ldm_numero}) signé`);
+
+        // Télécharger et archiver le PDF signé dans la GED
         try {
-          await ldmService.transitionner(
-            ldm.id, 'signer', 'expert', null, 'Yousign webhook',
-            { skipUrlCheck: true }
-          );
-          console.log(`[yousign] LDM ${ldm.numero} signée et activée automatiquement`);
-        } catch (e) {
-          console.error(`[yousign] LDM ${ldm.numero} transition erreur:`, e.message);
+          const fs   = require('fs');
+          const path = require('path');
+          const remote = await yousign.getSignatureRequestStatus(requestId);
+          const docId  = remote.documents?.[0]?.id;
+          if (docId) {
+            const signedBuf = await yousign.downloadSignedDocument(requestId, docId);
+            const DOCS_BASE = '/opt/parfi-data/documents';
+            const year = new Date().getFullYear();
+            const dir  = path.join(DOCS_BASE, String(mandat.client_id || 'general'), String(year));
+            fs.mkdirSync(dir, { recursive: true });
+            const TYPE_LABEL = { prelevement: 'Mandat_SEPA', impots: 'Procuration_Fiscale', urssaf: 'Procuration_Sociale' };
+            const fname = `${Date.now()}_${TYPE_LABEL[mandat.type] || 'Mandat'}_signe.pdf`;
+            const fpath = path.join(dir, fname);
+            fs.writeFileSync(fpath, signedBuf);
+
+            const [ins] = await pool.query(
+              `INSERT INTO documents (nom, description, chemin, type_document, type, lettreMissionId, client_id, taille, mimeType)
+               VALUES (?, ?, ?, 'mandat', 'mandat', ?, ?, ?, 'application/pdf')`,
+              [
+                fname,
+                `${TYPE_LABEL[mandat.type] || 'Mandat'} signé — LDM ${mandat.ldm_numero}`,
+                fpath,
+                mandat.ldm_id,
+                mandat.client_id || null,
+                signedBuf.length,
+              ]
+            );
+            await pool.query(
+              `UPDATE mandats SET chemin_pdf_signe = ? WHERE id = ?`,
+              [fpath, mandat.id]
+            );
+            console.log(`[yousign] Mandat ${mandat.type} archivé dans la GED (doc id=${ins.insertId})`);
+          }
+        } catch (archErr) {
+          console.error(`[yousign] archivage mandat ${mandat.type}:`, archErr.message);
         }
 
-        // Notification : demander l'affectation du collaborateur
-        const [experts] = await pool.query(
-          `SELECT id FROM utilisateurs WHERE role IN ('expert','chef_mission') AND actif = 1`
-        ).catch(() => [[]]);
-        for (const u of experts) {
-          await pool.query(
-            `INSERT INTO notifications (utilisateur_id, type, titre, message, lien, lue)
-             VALUES (?,?,?,?,?,0)`,
-            [u.id, 'ldm_signee',
-             `LDM signée : ${ldm.numero}`,
-             `La lettre de mission ${ldm.numero} a été signée par le client. Affectez un collaborateur pour planifier les tâches.`,
-             `/lettres-mission/${ldm.id}`]
-          ).catch(() => {});
-        }
+        // Vérifier si tous les documents sont maintenant signés pour activer la mission
+        await activerMissionSiComplete(mandat.ldm_id);
       }
     }
 
