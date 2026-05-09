@@ -174,6 +174,70 @@ router.get('/cabinet', verifyToken, async (req, res) => {
   }
 });
 
+// ─── /vue-cabinet — tous les dossiers du cabinet (expert/chef uniquement) ──────
+router.get('/vue-cabinet', verifyToken, async (req, res) => {
+  const isManager = ['expert','chef_mission'].includes(req.user.role) ||
+    ['expert_comptable','chef_de_groupe','chef_de_mission'].includes(req.user.role_metier);
+  if (!isManager) return res.status(403).json({ message: 'Accès réservé' });
+
+  const { collaborateur_id } = req.query;
+  const periode = ['exercice','mois',''].includes(req.query.periode ?? 'exercice')
+    ? (req.query.periode ?? 'exercice') : 'exercice';
+
+  const tC = periode === 'exercice' ? 'AND YEAR(tt.date_travail)=YEAR(CURDATE())'
+           : periode === 'mois'     ? 'AND YEAR(tt.date_travail)=YEAR(CURDATE()) AND MONTH(tt.date_travail)=MONTH(CURDATE())'
+           : '';
+  const fC = periode === 'exercice' ? 'AND YEAR(f.dateEmission)=YEAR(CURDATE())'
+           : periode === 'mois'     ? 'AND YEAR(f.dateEmission)=YEAR(CURDATE()) AND MONTH(f.dateEmission)=MONTH(CURDATE())'
+           : '';
+
+  try {
+    const params = [];
+    let filterSQL = '';
+    if (collaborateur_id) {
+      const cId = parseInt(collaborateur_id);
+      if (!isNaN(cId)) {
+        filterSQL = 'AND EXISTS (SELECT 1 FROM attributions af WHERE af.client_id=c.id AND af.utilisateur_id=?)';
+        params.push(cId);
+      }
+    }
+
+    const [rows] = await pool.query(`
+      SELECT
+        c.id AS client_id, c.nom AS client_nom, c.type AS client_type, c.siren,
+        lm.id AS ldm_id, lm.typeMission AS type_mission, lm.statut AS ldm_statut,
+        COALESCE(lm.montant_annuel_ht, lm.montantHonorairesHT, 0) AS budget_honoraires,
+        COALESCE(lm.budget_minutes_collab,0)+COALESCE(lm.budget_minutes_chef,0)
+          +COALESCE(lm.budget_minutes_expert,0) AS budget_minutes_total,
+        (SELECT COALESCE(SUM(f.totalHT),0) FROM factures f
+         WHERE f.client_id=c.id AND f.statut NOT IN ('brouillon','annulee') ${fC}
+        ) AS honoraires_factures,
+        (SELECT COALESCE(SUM(tt.duree_minutes),0)
+         FROM tache_temps tt JOIN taches ta ON ta.id=tt.tache_id
+         WHERE ta.client_id=c.id AND tt.statut NOT IN ('rejetee') ${tC}
+        ) AS temps_saisi_minutes,
+        (SELECT CONCAT(u2.prenom,' ',u2.nom)
+         FROM attributions a2 JOIN utilisateurs u2 ON u2.id=a2.utilisateur_id
+         WHERE a2.client_id=c.id AND a2.role_sur_dossier='responsable' LIMIT 1
+        ) AS responsable_nom,
+        (SELECT a2.utilisateur_id FROM attributions a2
+         WHERE a2.client_id=c.id AND a2.role_sur_dossier='responsable' LIMIT 1
+        ) AS responsable_id
+      FROM clients c
+      LEFT JOIN lettres_mission lm ON lm.client_id=c.id
+        AND lm.statut IN ('signee','active')
+        AND lm.id=(SELECT MAX(lm2.id) FROM lettres_mission lm2
+                   WHERE lm2.client_id=c.id AND lm2.statut IN ('signee','active'))
+      WHERE c.actif=1 ${filterSQL}
+      ORDER BY c.nom
+    `, params);
+
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ message: 'Erreur serveur', error: e.message });
+  }
+});
+
 // ─── /budget/synthese — résumé par collaborateur (expert/chef uniquement) ────
 router.get('/budget/synthese', verifyToken, async (req, res) => {
   const isManager = ['expert','chef_mission'].includes(req.user.role) ||
