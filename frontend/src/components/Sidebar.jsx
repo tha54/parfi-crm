@@ -53,7 +53,7 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       {/* Logo */}
-      <div className="sidebar-logo">
+      <div className="sidebar-logo" onClick={() => navigate('/ma-journee')} style={{ cursor: 'pointer' }}>
         <img src="/parfi-logo-dark.svg" alt="ParFi Group" />
         <div className="logo-sub">Espace de gestion</div>
       </div>
