@@ -66,15 +66,15 @@ function AppRoutes() {
   const { user } = useAuth();
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to="/ma-journee" replace /> : <Login />} />
 
       {/* Portail client (routes séparées, sans sidebar) */}
       <Route path="/portail" element={<PortalLogin />} />
       <Route path="/portail/dashboard" element={<PortalDashboard />} />
 
       {/* CRM principal */}
-      <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
-      <Route path="/briefing" element={<ProtectedRoute><AppLayout><MorningBriefing /></AppLayout></ProtectedRoute>} />
+      <Route path="/dashboard" element={<Navigate to="/ma-journee" replace />} />
+      <Route path="/briefing"  element={<Navigate to="/ma-journee" replace />} />
       <Route path="/ma-journee" element={<ProtectedRoute><AppLayout><MaJournee /></AppLayout></ProtectedRoute>} />
       <Route path="/mon-espace" element={<Navigate to="/ma-journee" replace />} />
       <Route path="/clients" element={<ProtectedRoute><AppLayout><Clients /></AppLayout></ProtectedRoute>} />
@@ -114,7 +114,7 @@ function AppRoutes() {
       <Route path="/appels" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Appels /></AppLayout></ProtectedRoute>} />
       <Route path="/contrats" element={<Navigate to="/lettres-mission?tab=contrats" replace />} />
       <Route path="/intake" element={<ClientIntake />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/ma-journee" replace />} />
     </Routes>
   );
 }

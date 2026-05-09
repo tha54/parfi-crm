@@ -600,13 +600,96 @@ function BlocTemps({ allTaches, totalMin, onTimeAdded }) {
 
 const labelSt = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 3 };
 
+const PRIORITE_COLORS = { urgente: '#ef4444', haute: '#f59e0b', normale: '#3b82f6', basse: '#9ca3af' };
+
+function fmt(v) {
+  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v || 0);
+}
+
+// ─── KPI strip ────────────────────────────────────────────────────────────────
+
+function KpiStrip({ kpis, navigate }) {
+  const k = kpis || {};
+  return (
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+      {[
+        { icon: '👥', value: k.clientsActifs ?? 0,          label: 'Clients actifs',       color: '#0f1f4b', to: '/clients' },
+        { icon: '📡', value: k.prospects ?? 0,              label: 'Prospects',             color: '#5bb8e8', to: '/prospects-pipeline' },
+        { icon: '🔴', value: k.tachesEnRetard ?? 0,         label: 'Tâches en retard',      color: '#ef4444', to: '/taches' },
+        { icon: '📋', value: k.tachesAFaire ?? 0,           label: 'À faire',               color: '#6b7c93', to: '/taches' },
+        { icon: '💰', value: fmt(k.caFacture),              label: 'CA facturé (année)',     color: '#10b981' },
+        k.impayesCount > 0
+          ? { icon: '⚠️', value: fmt(k.impayesMontant), label: `${k.impayesCount} impayée(s)`, color: '#ef4444', to: '/relances' }
+          : { icon: '📄', value: k.devisEnAttente ?? 0,     label: 'Devis en attente',      color: '#f59e0b', to: '/devis' },
+      ].map(({ icon, value, label, color, to }) => (
+        <div
+          key={label}
+          onClick={to ? () => navigate(to) : undefined}
+          style={{
+            flex: '1 1 140px', minWidth: 120, background: '#fff',
+            border: '1px solid var(--border)', borderTop: `3px solid ${color}`,
+            borderRadius: 8, padding: '10px 14px',
+            cursor: to ? 'pointer' : 'default',
+            transition: 'box-shadow .15s',
+          }}
+          onMouseEnter={e => to && (e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,.08)')}
+          onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
+        >
+          <div style={{ fontSize: 18, marginBottom: 4 }}>{icon}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color, letterSpacing: -0.5, lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3, fontWeight: 500 }}>{label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Échéances fiscales ───────────────────────────────────────────────────────
+
+function BlocEcheances({ echeances, navigate }) {
+  if (!echeances || echeances.length === 0) return null;
+  return (
+    <div className="card" style={{ marginTop: 20 }}>
+      <div className="card-header">
+        <span className="card-title">📅 Prochaines échéances fiscales (30 jours)</span>
+        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => navigate('/planning')}>Voir tout</button>
+      </div>
+      <div className="card-body" style={{ padding: 0 }}>
+        <div className="table-wrapper">
+          <table>
+            <thead><tr><th>Date</th><th>Libellé</th><th>Client</th><th>Statut</th></tr></thead>
+            <tbody>
+              {echeances.map(e => {
+                const late = new Date(e.date_echeance) < new Date();
+                return (
+                  <tr key={e.id}>
+                    <td style={{ fontWeight: 600 }}>{new Date(e.date_echeance).toLocaleDateString('fr-FR')}</td>
+                    <td>{e.label}</td>
+                    <td>{e.client_nom || '—'}</td>
+                    <td>
+                      <span className={`badge badge-${e.statut === 'termine' ? 'termine' : late ? 'inactif' : 'en_cours'}`}>
+                        {e.statut === 'termine' ? 'Terminé' : late ? 'En retard' : 'À faire'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function MaJournee() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const today = todayISO();
+  const isExpertOrChef = ['expert', 'chef_mission'].includes(user?.role);
+
   const dateLabel = (() => {
     const s = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
     return s.charAt(0).toUpperCase() + s.slice(1);
@@ -618,35 +701,44 @@ export default function MaJournee() {
   const [evenements, setEvenements]     = useState([]);
   const [factuAlertes, setFactuAlertes] = useState([]);
   const [clientBudgets, setClientBudgets] = useState({});
+  const [kpis, setKpis]                 = useState(null);
+  const [echeances, setEcheances]       = useState([]);
   const [loading, setLoading]           = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
 
-  const loadTaches = useCallback(async () => {
-    const { data } = await api.get(`/taches?utilisateur_id=${user.id}`);
-    setAllTaches(data || []);
-  }, [user.id]);
-
   const loadTemps = useCallback(async () => {
-    const semaine = getMondayStr();
-    const { data } = await api.get(`/tache-temps/feuille?semaine=${semaine}`);
+    const { data } = await api.get(`/tache-temps/feuille?semaine=${getMondayStr()}`);
     setTotalMin(data?.total_semaine || 0);
   }, []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, ttRes, actRes, factuRes, clientsRes] = await Promise.all([
+      const calls = [
         api.get(`/taches?utilisateur_id=${user.id}`),
         api.get(`/tache-temps/feuille?semaine=${getMondayStr()}`),
         api.get('/activite-cabinet').catch(() => ({ data: { alertes: [], evenements: [] } })),
         api.get('/alertes-facturation').catch(() => ({ data: [] })),
         api.get('/clients').catch(() => ({ data: [] })),
-      ]);
+      ];
+      if (isExpertOrChef) {
+        calls.push(api.get('/dashboard/kpis').catch(() => ({ data: {} })));
+        calls.push(api.get('/planning/echeances').catch(() => ({ data: [] })));
+      }
+      const [tRes, ttRes, actRes, factuRes, clientsRes, kpisRes, echeancesRes] = await Promise.all(calls);
       setAllTaches(tRes.data || []);
       setTotalMin(ttRes.data?.total_semaine || 0);
       setAlertes(actRes.data?.alertes || []);
       setEvenements(actRes.data?.evenements || []);
       setFactuAlertes(factuRes.data || []);
+      if (kpisRes) setKpis(kpisRes.data || {});
+      if (echeancesRes) {
+        const now = new Date();
+        const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+        setEcheances((echeancesRes.data || []).filter(e =>
+          e.statut !== 'termine' && new Date(e.date_echeance) <= in30
+        ).sort((a, b) => a.date_echeance < b.date_echeance ? -1 : 1));
+      }
       const map = {};
       for (const c of (clientsRes.data || [])) {
         map[c.id] = {
@@ -657,7 +749,7 @@ export default function MaJournee() {
       setClientBudgets(map);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [user.id]);
+  }, [user.id, isExpertOrChef]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -675,7 +767,6 @@ export default function MaJournee() {
         @media (max-width: 680px)  { .mj-grid { grid-template-columns: 1fr; } .mj-col2,.mj-col3 { grid-column: auto; } }
       `}</style>
 
-      {/* Page header — sticky, flush avec le pattern global */}
       <div className="page-header">
         <div>
           <h1 className="page-title" style={{ marginBottom: 2 }}>Ma journée</h1>
@@ -684,24 +775,29 @@ export default function MaJournee() {
         <CabinetBell alertes={alertes} factuAlertes={factuAlertes} evenements={evenements} />
       </div>
 
-      {/* Content */}
       <div className="page-body">
         {loading ? (
           <div style={{ textAlign: 'center', padding: 80 }}>
             <div className="spinner"><div className="spinner-ring" /></div>
           </div>
         ) : (
-          <div className="mj-grid">
-            <div className="mj-col1">
-              <BlocTaches allTaches={allTaches} selectedDate={selectedDate} onSelectDate={setSelectedDate} clientBudgets={clientBudgets} />
+          <>
+            {isExpertOrChef && kpis && <KpiStrip kpis={kpis} navigate={navigate} />}
+
+            <div className="mj-grid">
+              <div className="mj-col1">
+                <BlocTaches allTaches={allTaches} selectedDate={selectedDate} onSelectDate={setSelectedDate} clientBudgets={clientBudgets} />
+              </div>
+              <div className="mj-col2">
+                <BlocCalendar allTaches={allTaches} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+              </div>
+              <div className="mj-col3">
+                <BlocTemps allTaches={allTaches} totalMin={totalMin} onTimeAdded={loadTemps} />
+              </div>
             </div>
-            <div className="mj-col2">
-              <BlocCalendar allTaches={allTaches} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
-            </div>
-            <div className="mj-col3">
-              <BlocTemps allTaches={allTaches} totalMin={totalMin} onTimeAdded={loadTemps} />
-            </div>
-          </div>
+
+            {isExpertOrChef && <BlocEcheances echeances={echeances} navigate={navigate} />}
+          </>
         )}
       </div>
     </>

@@ -887,9 +887,16 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
           );
 
           // 2 — Envoyer chaque mandat dans sa propre requête Yousign (1 doc = 1 requête)
+          // req.body.mandats = tableau des types à inclure (ex: ['prelevement','urssaf'])
+          // undefined = tous les mandats (rétrocompat) ; [] = aucun mandat
+          const mandatsSelectionnes = Array.isArray(req.body.mandats)
+            ? req.body.mandats
+            : ['prelevement', 'impots', 'urssaf'];
+
           let mandatsEnvoyes = 0;
           try {
-            const mandatDocs = await genererTousMandats({ client: clientRow, cabinet, ldm });
+            const allMandatDocs = await genererTousMandats({ client: clientRow, cabinet, ldm });
+            const mandatDocs = allMandatDocs.filter(md => mandatsSelectionnes.includes(md.type));
             const LABELS = {
               prelevement: 'Mandat de prélèvement SEPA',
               impots:      'Procuration fiscale',

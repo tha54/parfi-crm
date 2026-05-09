@@ -266,8 +266,8 @@ export default function LDMDetail() {
   const [annulerModal, setAnnulerModal] = useState(false);
   const [editMission, setEditMission] = useState(false);
   const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '', periodicite_facturation: '', date_premiere_facture: '' });
-  const [dateFactureModal, setDateFactureModal] = useState(false);
-  const [dateFactureForm, setDateFactureForm] = useState({ date_premiere_facture: '', periodicite_facturation: '' });
+  const [envoyerModal, setEnvoyerModal] = useState(false);
+  const [envoyerConfig, setEnvoyerConfig] = useState({ mandats: ['prelevement', 'impots', 'urssaf'], date_premiere_facture: '', periodicite_facturation: '' });
   const [savingMission, setSavingMission] = useState(false);
 
   const isExpert = user?.role === 'expert';
@@ -342,38 +342,44 @@ export default function LDMDetail() {
     setEmailModal({ nomContact, resolve });
   });
 
-  const confirmDateFacture = async () => {
-    if (!dateFactureForm.date_premiere_facture) return;
+  const ouvrirEnvoyerModal = () => {
+    // Pré-cocher uniquement les mandats pas encore signés
+    const dejaSignes = new Set(mandats.filter(m => m.signe).map(m => m.type));
+    setEnvoyerConfig({
+      mandats: ['prelevement', 'impots', 'urssaf'].filter(t => !dejaSignes.has(t)),
+      date_premiere_facture: ldm.date_premiere_facture ? ldm.date_premiere_facture.split('T')[0] : '',
+      periodicite_facturation: ldm.periodicite_facturation || '',
+    });
+    setEnvoyerModal(true);
+  };
+
+  const confirmerEnvoi = async () => {
     try {
-      const payload = { date_premiere_facture: dateFactureForm.date_premiere_facture };
-      if (dateFactureForm.periodicite_facturation) payload.periodicite_facturation = dateFactureForm.periodicite_facturation;
-      await api.put(`/lettres-mission/${id}`, payload);
-      setLdm(d => ({ ...d, ...payload }));
-      setDateFactureModal(false);
-      // small delay so state update propagates before envoyerLDM reads ldm
-      setTimeout(() => envoyerLDM(), 0);
+      if (!ldm.date_premiere_facture && envoyerConfig.date_premiere_facture) {
+        const payload = { date_premiere_facture: envoyerConfig.date_premiere_facture };
+        if (envoyerConfig.periodicite_facturation) payload.periodicite_facturation = envoyerConfig.periodicite_facturation;
+        await api.put(`/lettres-mission/${id}`, payload);
+        setLdm(d => ({ ...d, ...payload }));
+      }
+      setEnvoyerModal(false);
+      envoyerLDM(null, envoyerConfig.mandats);
     } catch (e) {
-      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur lors de l\'enregistrement de la date' });
+      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur lors de l\'enregistrement' });
     }
   };
 
-  const envoyerLDM = async (emailOverride) => {
-    if (!ldm.date_premiere_facture) {
-      setDateFactureForm({
-        date_premiere_facture: '',
-        periodicite_facturation: ldm.periodicite_facturation || '',
-      });
-      setDateFactureModal(true);
-      return;
-    }
+  const envoyerLDM = async (emailOverride, mandatsSel) => {
     setSigning(true); setMsg(null);
     try {
-      const { data } = await api.post(`/lettres-mission/${id}/envoyer`, emailOverride ? { emailOverride } : {});
+      const body = {};
+      if (emailOverride) body.emailOverride = emailOverride;
+      if (mandatsSel !== undefined) body.mandats = mandatsSel;
+      const { data } = await api.post(`/lettres-mission/${id}/envoyer`, body);
       if (data.missingEmail) {
         setSigning(false);
         const email = await askEmail(data.nomContact);
         if (!email) return;
-        return envoyerLDM(email);
+        return envoyerLDM(email, mandatsSel);
       }
       if (data.emailError) {
         setMsg({ type: 'warn', text: `Statut mis à jour, mais l'email n'a pas pu être envoyé : ${data.emailError}` });
@@ -628,7 +634,7 @@ export default function LDMDetail() {
             description="La LDM a été générée depuis le devis. Vérifiez les informations, modifiez si nécessaire, puis envoyez-la au client pour signature."
             primary={{
               label: signing ? 'Envoi…' : '📤 Envoyer pour signature',
-              onClick: () => envoyerLDM(),
+              onClick: ouvrirEnvoyerModal,
               disabled: signing,
               color: '#2563eb',
             }}
@@ -678,7 +684,7 @@ export default function LDMDetail() {
             description="La LDM a été validée en interne. Cliquer « Envoyer pour signature » envoie automatiquement le document par email au client."
             primary={{
               label: signing ? 'Envoi…' : '📤 Envoyer pour signature',
-              onClick: () => envoyerLDM(),
+              onClick: ouvrirEnvoyerModal,
               disabled: signing,
               color: '#2563eb',
             }}
@@ -704,7 +710,7 @@ export default function LDMDetail() {
               color: '#0f1f4b',
             }}
             secondaries={[
-              { label: signing ? '…' : '↻ Renvoyer', onClick: () => envoyerLDM(), disabled: signing },
+              { label: signing ? '…' : '↻ Renvoyer', onClick: ouvrirEnvoyerModal, disabled: signing },
             ]}
             color="#f59e0b"
           />
@@ -1515,52 +1521,103 @@ export default function LDMDetail() {
         </div>
       )}
 
-      {/* Modal date première facture — obligatoire avant envoi au client */}
-      {dateFactureModal && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDateFactureModal(false)}>
-          <div className="modal" style={{ maxWidth: 440 }}>
+      {/* Modal "Préparer l'envoi" — sélection mandats + date facture */}
+      {envoyerModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEnvoyerModal(false)}>
+          <div className="modal" style={{ maxWidth: 480 }}>
             <div className="modal-header">
-              <span className="modal-title">📅 Date de la première facture</span>
-              <button className="modal-close" onClick={() => setDateFactureModal(false)}>×</button>
+              <span className="modal-title">📤 Préparer l'envoi au client</span>
+              <button className="modal-close" onClick={() => setEnvoyerModal(false)}>×</button>
             </div>
             <div className="modal-body">
-              <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', marginBottom: 18, fontSize: 13, color: '#92400e' }}>
-                La date de la première facture est obligatoire avant l'envoi au client. Elle détermine le point de départ du plan de facturation.
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Date 1ère facture <span style={{ color: '#dc2626' }}>*</span></label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={dateFactureForm.date_premiere_facture}
-                    onChange={e => setDateFactureForm(f => ({ ...f, date_premiere_facture: e.target.value }))}
-                    autoFocus
-                  />
+
+              {/* Mandats */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: 'var(--text)' }}>
+                  Mandats à envoyer pour signature
                 </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Périodicité{!ldm.periodicite_facturation && <span style={{ color: '#dc2626' }}> *</span>}</label>
-                  <select
-                    className="form-control"
-                    value={dateFactureForm.periodicite_facturation}
-                    onChange={e => setDateFactureForm(f => ({ ...f, periodicite_facturation: e.target.value }))}
-                  >
-                    <option value="">— Sélectionner —</option>
-                    <option value="mensuelle">Mensuelle</option>
-                    <option value="trimestrielle">Trimestrielle</option>
-                    <option value="semestrielle">Semestrielle</option>
-                    <option value="annuelle">Annuelle</option>
-                  </select>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                  Décochez les mandats déjà signés ou non nécessaires pour cette mission.
                 </div>
+                {[
+                  { type: 'prelevement', label: 'Mandat de prélèvement SEPA' },
+                  { type: 'impots',      label: 'Procuration fiscale (impôts)' },
+                  { type: 'urssaf',      label: 'Procuration sociale (URSSAF)' },
+                ].map(({ type, label }) => {
+                  const mandat = mandats.find(m => m.type === type);
+                  const checked = envoyerConfig.mandats.includes(type);
+                  return (
+                    <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', background: checked ? '#f0f9ff' : '#f9fafb', border: `1px solid ${checked ? '#bae6fd' : 'var(--border)'}`, marginBottom: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setEnvoyerConfig(c => ({
+                          ...c,
+                          mandats: checked ? c.mandats.filter(t => t !== type) : [...c.mandats, type],
+                        }))}
+                      />
+                      <span style={{ flex: 1, fontSize: 13 }}>{label}</span>
+                      {mandat?.signe ? (
+                        <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>✓ déjà signé</span>
+                      ) : mandat?.yousign_request_id ? (
+                        <span style={{ fontSize: 11, color: '#d97706' }}>en attente</span>
+                      ) : null}
+                    </label>
+                  );
+                })}
+                {envoyerConfig.mandats.length === 0 && (
+                  <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic', marginTop: 6 }}>
+                    Aucun mandat ne sera envoyé avec cette LDM.
+                  </div>
+                )}
               </div>
+
+              {/* Date première facture si manquante */}
+              {!ldm.date_premiere_facture && (
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginBottom: 4 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: 'var(--text)' }}>
+                    Facturation <span style={{ color: '#dc2626', fontSize: 12 }}>— requis</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label">Date 1ère facture <span style={{ color: '#dc2626' }}>*</span></label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={envoyerConfig.date_premiere_facture}
+                        onChange={e => setEnvoyerConfig(c => ({ ...c, date_premiere_facture: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label">Périodicité{!ldm.periodicite_facturation && <span style={{ color: '#dc2626' }}> *</span>}</label>
+                      <select
+                        className="form-control"
+                        value={envoyerConfig.periodicite_facturation}
+                        onChange={e => setEnvoyerConfig(c => ({ ...c, periodicite_facturation: e.target.value }))}
+                      >
+                        <option value="">— Sélectionner —</option>
+                        <option value="mensuelle">Mensuelle</option>
+                        <option value="trimestrielle">Trimestrielle</option>
+                        <option value="semestrielle">Semestrielle</option>
+                        <option value="annuelle">Annuelle</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="form-actions" style={{ marginTop: 24 }}>
-                <button className="btn btn-ghost" onClick={() => setDateFactureModal(false)}>Annuler</button>
+                <button className="btn btn-ghost" onClick={() => setEnvoyerModal(false)}>Annuler</button>
                 <button
                   className="btn btn-primary"
-                  onClick={confirmDateFacture}
-                  disabled={!dateFactureForm.date_premiere_facture || (!ldm.periodicite_facturation && !dateFactureForm.periodicite_facturation)}
+                  onClick={confirmerEnvoi}
+                  disabled={
+                    signing ||
+                    (!ldm.date_premiere_facture && (!envoyerConfig.date_premiere_facture || (!ldm.periodicite_facturation && !envoyerConfig.periodicite_facturation)))
+                  }
+                  style={{ background: '#2563eb' }}
                 >
-                  Enregistrer et envoyer
+                  {signing ? 'Envoi…' : `📤 Envoyer${envoyerConfig.mandats.length > 0 ? ` + ${envoyerConfig.mandats.length} mandat(s)` : ''}`}
                 </button>
               </div>
             </div>
