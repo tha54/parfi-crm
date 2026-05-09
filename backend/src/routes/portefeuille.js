@@ -13,11 +13,11 @@ router.get('/', verifyToken, async (req, res) => {
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    // Dossiers attribués (toutes postures : responsable, assistant, chef_mission)
+    // Dossiers attribués OU liés via LDM (collaborateur_id / chef_mission_id)
     const [dossiers] = await pool.query(`
       SELECT
         c.id, c.nom, c.siren, c.type, c.regime,
-        a.role_sur_dossier,
+        COALESCE(a.role_sur_dossier, 'responsable') AS role_sur_dossier,
         lm.id               AS ldm_id,
         lm.numero           AS ldm_numero,
         lm.statut           AS ldm_statut,
@@ -28,16 +28,26 @@ router.get('/', verifyToken, async (req, res) => {
         COALESCE(SUM(CASE WHEN t.statut = 'a_faire'  THEN 1 ELSE 0 END), 0)                           AS nb_a_faire,
         COALESCE(SUM(CASE WHEN t.statut = 'en_cours' THEN 1 ELSE 0 END), 0)                           AS nb_en_cours,
         MIN(CASE WHEN t.statut IN ('a_faire','en_cours') AND t.date_echeance IS NOT NULL THEN t.date_echeance END) AS prochaine_echeance
-      FROM attributions a
-      JOIN clients c ON a.client_id = c.id
+      FROM clients c
+      LEFT JOIN attributions a ON a.client_id = c.id
+        AND a.utilisateur_id = ? AND a.role_sur_dossier IN ('responsable','assistant','chef_mission')
       LEFT JOIN lettres_mission lm ON lm.client_id = c.id AND lm.statut = 'active'
       LEFT JOIN taches t ON t.client_id = c.id AND t.utilisateur_id = ? AND t.statut != 'termine'
-      WHERE a.utilisateur_id = ? AND a.role_sur_dossier IN ('responsable','assistant','chef_mission')
-      GROUP BY c.id, lm.id, a.role_sur_dossier
+      WHERE c.actif = 1
+        AND (
+          a.client_id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM lettres_mission lm_link
+            WHERE lm_link.client_id = c.id
+              AND (lm_link.collaborateur_id = ? OR lm_link.chef_mission_id = ?)
+              AND lm_link.statut NOT IN ('brouillon', 'resiliee')
+          )
+        )
+      GROUP BY c.id, lm.id, COALESCE(a.role_sur_dossier, 'responsable')
       ORDER BY
-        FIELD(a.role_sur_dossier,'responsable','chef_mission','assistant'),
+        FIELD(COALESCE(a.role_sur_dossier,'responsable'),'responsable','chef_mission','assistant'),
         nb_retard DESC, prochaine_echeance ASC, c.nom ASC
-    `, [targetId, targetId]);
+    `, [targetId, targetId, targetId, targetId]);
 
     // Toutes les tâches actives du collaborateur
     const [taches] = await pool.query(`
