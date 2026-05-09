@@ -429,11 +429,16 @@ function DossierCard({ d, selected, onClick }) {
         {ldmS && <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 6, background: ldmS.color + '15', color: ldmS.color, border: `1px solid ${ldmS.color}25` }}>LDM {ldmS.label}</span>}
         <span style={{ fontSize: 11, color: '#6b7c93' }}>{Number(d.nb_taches)} tâche{d.nb_taches != 1 ? 's' : ''}</span>
       </div>
-      {d.prochaine_echeance && (
-        <div style={{ fontSize: 11, color: isRetard(d.prochaine_echeance, 'a_faire') ? '#dc2626' : '#9ca3af' }}>
-          Prochaine : {fmtDate(d.prochaine_echeance)}
-        </div>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {d.prochaine_echeance ? (
+          <div style={{ fontSize: 11, color: isRetard(d.prochaine_echeance, 'a_faire') ? '#dc2626' : '#9ca3af' }}>
+            Prochaine : {fmtDate(d.prochaine_echeance)}
+          </div>
+        ) : <span />}
+        {Number(d.ca_facture_annee) > 0 && (
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>{fmt(d.ca_facture_annee)}</div>
+        )}
+      </div>
     </button>
   );
 }
@@ -545,7 +550,7 @@ function VuePersonnelle({ user }) {
           { v: stats.nbRetard,      l: 'En retard',      color: '#ef4444' },
           { v: stats.nbEnCours,     l: 'En cours',       color: '#f59e0b' },
           { v: stats.nbAFaire,      l: 'À faire',        color: '#3b82f6' },
-          { v: fmt(stats.caAnnuel), l: 'CA annuel géré', color: '#059669' },
+          { v: fmt(stats.caAnnuel), l: 'CA facturé (exercice)', color: '#059669' },
         ].map(({ v, l, color }) => (
           <div key={l} style={{ background: '#fff', border: '1px solid #dce6f0', borderLeft: `4px solid ${color}`, borderRadius: 8, padding: '10px 16px', minWidth: 120, boxShadow: '0 1px 3px rgba(15,31,75,0.06)' }}>
             <div style={{ fontSize: 18, fontWeight: 800, color }}>{v}</div>

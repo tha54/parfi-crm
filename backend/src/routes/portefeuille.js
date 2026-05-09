@@ -23,6 +23,12 @@ router.get('/', verifyToken, async (req, res) => {
         lm.statut           AS ldm_statut,
         lm.montantHonorairesHT AS ldm_montant,
         lm.dateDebut        AS ldm_date_debut,
+        (SELECT COALESCE(SUM(f.totalHT), 0)
+         FROM factures f
+         WHERE f.client_id = c.id
+           AND f.statut NOT IN ('brouillon', 'annulee')
+           AND YEAR(f.dateEmission) = YEAR(CURDATE())
+        ) AS ca_facture_annee,
         COALESCE(COUNT(DISTINCT t.id), 0)                                                              AS nb_taches,
         COALESCE(SUM(CASE WHEN t.statut IN ('a_faire','en_cours') AND t.date_echeance < CURDATE() THEN 1 ELSE 0 END), 0) AS nb_retard,
         COALESCE(SUM(CASE WHEN t.statut = 'a_faire'  THEN 1 ELSE 0 END), 0)                           AS nb_a_faire,
@@ -76,7 +82,7 @@ router.get('/', verifyToken, async (req, res) => {
       nbRetard:   dossiers.reduce((s, d) => s + Number(d.nb_retard), 0),
       nbEnCours:  dossiers.reduce((s, d) => s + Number(d.nb_en_cours), 0),
       nbAFaire:   actives.filter(t => t.statut === 'a_faire').length,
-      caAnnuel:   dossiers.reduce((s, d) => s + Number(d.ldm_montant || 0), 0),
+      caAnnuel:   dossiers.reduce((s, d) => s + Number(d.ca_facture_annee || 0), 0),
     };
 
     res.json({ dossiers, taches, stats });
