@@ -55,6 +55,7 @@ const microPrestationsRoutes = require('./routes/micro_prestations');
 const microDevisRoutes = require('./routes/micro_devis');
 const microFacturesRoutes = require('./routes/micro_factures');
 const { router: microRelancesRoutes } = require('./routes/micro_relances');
+const microPortailRoutes = require('./routes/micro_portail');
 
 const { startScheduler } = require('./scheduler');
 
@@ -142,6 +143,7 @@ app.use('/api/micro-prestations', microPrestationsRoutes);
 app.use('/api/micro-devis', microDevisRoutes);
 app.use('/api/micro-factures', microFacturesRoutes);
 app.use('/api/micro-relances', microRelancesRoutes);
+app.use('/api/micro-portail', microPortailRoutes);
 app.use('/micro-factures-pdf', express.static('/opt/parfi-data/micro-factures'));
 app.post('/api/webhooks/powens', powensWebhook);
 

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { MicroPortalAuthProvider, useMicroPortalAuth } from './context/MicroPortalAuthContext';
 import Sidebar from './components/Sidebar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -54,12 +55,24 @@ import MicroFactureForm from './pages/MicroFactureForm';
 import MicroFactureDetail from './pages/MicroFactureDetail';
 import MicroLivreRecettes from './pages/MicroLivreRecettes';
 import MicroRelances from './pages/MicroRelances';
+import MicroPortalLogin from './pages/MicroPortalLogin';
+import MicroPortalDashboard from './pages/MicroPortalDashboard';
+import { MicroPortalDevisList, MicroPortalDevisDetail } from './pages/MicroPortalDevis';
+import { MicroPortalFacturesList, MicroPortalFactureDetail } from './pages/MicroPortalFactures';
+import MicroPortalLivreRecettes from './pages/MicroPortalLivreRecettes';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="spinner"><div className="spinner-ring" /></div>;
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+function ProtectedMicroPortalRoute({ children }) {
+  const { portalUser, loading } = useMicroPortalAuth();
+  if (loading) return <div className="spinner"><div className="spinner-ring" /></div>;
+  if (!portalUser) return <Navigate to="/micro-portail/login" replace />;
   return children;
 }
 
@@ -100,6 +113,16 @@ function AppRoutes() {
       <Route path="/clients/:id/micro/livre-recettes" element={<ProtectedRoute><AppLayout><MicroLivreRecettes /></AppLayout></ProtectedRoute>} />
       <Route path="/clients/:id/micro/relances" element={<ProtectedRoute><AppLayout><MicroRelances /></AppLayout></ProtectedRoute>} />
       <Route path="/signature/:token" element={<MicroSignature />} />
+
+      {/* Portail micro-entrepreneur (auth propre, sans sidebar CRM) */}
+      <Route path="/micro-portail/login" element={<MicroPortalLogin />} />
+      <Route path="/micro-portail/dashboard" element={<ProtectedMicroPortalRoute><MicroPortalDashboard /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/devis" element={<ProtectedMicroPortalRoute><MicroPortalDevisList /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/devis/:id" element={<ProtectedMicroPortalRoute><MicroPortalDevisDetail /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/factures" element={<ProtectedMicroPortalRoute><MicroPortalFacturesList /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/factures/:id" element={<ProtectedMicroPortalRoute><MicroPortalFactureDetail /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/livre-recettes" element={<ProtectedMicroPortalRoute><MicroPortalLivreRecettes /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail" element={<Navigate to="/micro-portail/login" replace />} />
       <Route path="/attributions" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
       <Route path="/portefeuille" element={<ProtectedRoute><AppLayout><MonPortefeuille /></AppLayout></ProtectedRoute>} />
       <Route path="/taches" element={<ProtectedRoute><AppLayout><Taches /></AppLayout></ProtectedRoute>} />
@@ -143,7 +166,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <MicroPortalAuthProvider>
+          <AppRoutes />
+        </MicroPortalAuthProvider>
       </AuthProvider>
     </BrowserRouter>
   );

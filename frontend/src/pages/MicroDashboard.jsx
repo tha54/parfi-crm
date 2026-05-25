@@ -361,6 +361,97 @@ function ContactsSection({ microClientId }) {
   );
 }
 
+// ─── Accès portail micro ──────────────────────────────────────────────────────
+function PortailAccesSection({ microClientId }) {
+  const [acc, setAcc] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    api.get(`/micro-portail/admin/access/${microClientId}`)
+      .then(r => { setAcc(r.data); if (r.data?.email) setEmail(r.data.email); })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [microClientId]);
+
+  const save = async () => {
+    if (!email || !password) return setMsg({ type: 'error', text: 'Email et mot de passe requis' });
+    setSaving(true); setMsg(null);
+    try {
+      await api.post('/micro-portail/admin/create-access', { micro_client_id: microClientId, email, password });
+      const r = await api.get(`/micro-portail/admin/access/${microClientId}`);
+      setAcc(r.data); setPassword('');
+      setMsg({ type: 'success', text: 'Accès portail créé / mis à jour' });
+    } catch (e) { setMsg({ type: 'error', text: e.response?.data?.error || 'Erreur' }); }
+    finally { setSaving(false); }
+  };
+
+  const revoke = async () => {
+    if (!confirm('Révoquer l\'accès portail ?')) return;
+    await api.delete(`/micro-portail/admin/revoke/${microClientId}`).catch(() => {});
+    setAcc(prev => prev ? { ...prev, actif: 0 } : null);
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div>
+      <SectionHeader title="Accès portail micro-entrepreneur" />
+      {acc?.actif ? (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13, color: '#166534' }}>✓ Accès actif — {acc.email}</div>
+            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+              Dernière connexion : {acc.derniere_connexion ? new Date(acc.derniere_connexion).toLocaleString('fr-FR') : 'Jamais'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a href="/micro-portail/login" target="_blank" rel="noreferrer"
+              style={{ padding: '6px 12px', background: '#0F1F4B', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+              Ouvrir portail ↗
+            </a>
+            <button onClick={revoke}
+              style={{ padding: '6px 12px', background: '#fff', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+              Révoquer
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginBottom: 14, fontSize: 13, color: '#854d0e' }}>
+          {acc ? 'Accès portail révoqué.' : 'Aucun accès portail configuré pour ce client.'}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Email de connexion</label>
+          <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="client@email.fr"
+            style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>
+            {acc?.actif ? 'Nouveau mot de passe' : 'Mot de passe'}
+          </label>
+          <input value={password} onChange={e => setPassword(e.target.value)} type="password" placeholder="Min. 8 caractères"
+            style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+        </div>
+        <button onClick={save} disabled={saving}
+          style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          {saving ? '…' : acc?.actif ? 'Mettre à jour' : 'Créer l\'accès'}
+        </button>
+      </div>
+      {msg && (
+        <div style={{ marginTop: 10, fontSize: 13, color: msg.type === 'error' ? '#dc2626' : '#059669', fontWeight: 600 }}>
+          {msg.type === 'success' ? '✓ ' : '✗ '}{msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Prestations catalogue ────────────────────────────────────────────────────
 function PrestationsSection({ microClientId }) {
   const [prestations, setPrestations] = useState([]);
@@ -639,6 +730,9 @@ export default function MicroDashboard() {
             </div>
             <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20 }}>
               <PrestationsSection microClientId={microClient.id} />
+            </div>
+            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20 }}>
+              <PortailAccesSection microClientId={microClient.id} />
             </div>
           </>
         )}
