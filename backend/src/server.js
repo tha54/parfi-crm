@@ -49,6 +49,12 @@ const activiteRoutes = require('./routes/activite');
 const alertesFacturationRoutes = require('./routes/alertesFacturation');
 const { router: powensRoutes, handleWebhook: powensWebhook } = require('./routes/powens');
 const signaturesRoutes = require('./routes/signatures');
+const microClientsRoutes = require('./routes/micro_clients');
+const microContactsRoutes = require('./routes/micro_contacts');
+const microPrestationsRoutes = require('./routes/micro_prestations');
+const microDevisRoutes = require('./routes/micro_devis');
+const microFacturesRoutes = require('./routes/micro_factures');
+const { router: microRelancesRoutes } = require('./routes/micro_relances');
 
 const { startScheduler } = require('./scheduler');
 
@@ -82,6 +88,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static file serving for uploads preview
 app.use('/uploads', express.static('/opt/parfi-data/documents'));
+app.use('/micro-devis-pdf', express.static('/opt/parfi-data/micro-devis'));
 
 app.use('/api/signatures', signaturesRoutes);
 app.use('/api/auth', authRoutes);
@@ -129,6 +136,13 @@ app.use('/api/portefeuille', portefeuilleRoutes);
 app.use('/api/activite-cabinet', activiteRoutes);
 app.use('/api/alertes-facturation', alertesFacturationRoutes);
 app.use('/api/powens', powensRoutes);
+app.use('/api/micro-clients', microClientsRoutes);
+app.use('/api/micro-contacts', microContactsRoutes);
+app.use('/api/micro-prestations', microPrestationsRoutes);
+app.use('/api/micro-devis', microDevisRoutes);
+app.use('/api/micro-factures', microFacturesRoutes);
+app.use('/api/micro-relances', microRelancesRoutes);
+app.use('/micro-factures-pdf', express.static('/opt/parfi-data/micro-factures'));
 app.post('/api/webhooks/powens', powensWebhook);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Parfi CRM API v2.3' }));

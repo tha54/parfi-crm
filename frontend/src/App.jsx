@@ -44,6 +44,16 @@ import ProspectsPipeline from './pages/ProspectsPipeline';
 import FeuilleDeTTemps from './pages/FeuilleDeTTemps';
 import ValidationTemps from './pages/ValidationTemps';
 import Lettrage from './pages/Lettrage';
+import MicroDashboard from './pages/MicroDashboard';
+import MicroDevisList from './pages/MicroDevisList';
+import MicroDevisForm from './pages/MicroDevisForm';
+import MicroDevisDetail from './pages/MicroDevisDetail';
+import MicroSignature from './pages/MicroSignature';
+import MicroFacturesList from './pages/MicroFacturesList';
+import MicroFactureForm from './pages/MicroFactureForm';
+import MicroFactureDetail from './pages/MicroFactureDetail';
+import MicroLivreRecettes from './pages/MicroLivreRecettes';
+import MicroRelances from './pages/MicroRelances';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -80,6 +90,16 @@ function AppRoutes() {
       <Route path="/clients" element={<ProtectedRoute><AppLayout><Clients /></AppLayout></ProtectedRoute>} />
       <Route path="/clients/a-completer" element={<ProtectedRoute><AppLayout><ClientsACompleter /></AppLayout></ProtectedRoute>} />
       <Route path="/clients/:id" element={<ProtectedRoute><AppLayout><ClientCockpit /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro" element={<ProtectedRoute><AppLayout><MicroDashboard /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/devis" element={<ProtectedRoute><AppLayout><MicroDevisList /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/devis/nouveau" element={<ProtectedRoute><AppLayout><MicroDevisForm /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/devis/:devisId" element={<ProtectedRoute><AppLayout><MicroDevisDetail /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/factures" element={<ProtectedRoute><AppLayout><MicroFacturesList /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/factures/nouvelle" element={<ProtectedRoute><AppLayout><MicroFactureForm /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/factures/:factureId" element={<ProtectedRoute><AppLayout><MicroFactureDetail /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/livre-recettes" element={<ProtectedRoute><AppLayout><MicroLivreRecettes /></AppLayout></ProtectedRoute>} />
+      <Route path="/clients/:id/micro/relances" element={<ProtectedRoute><AppLayout><MicroRelances /></AppLayout></ProtectedRoute>} />
+      <Route path="/signature/:token" element={<MicroSignature />} />
       <Route path="/attributions" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Attributions /></AppLayout></ProtectedRoute>} />
       <Route path="/portefeuille" element={<ProtectedRoute><AppLayout><MonPortefeuille /></AppLayout></ProtectedRoute>} />
       <Route path="/taches" element={<ProtectedRoute><AppLayout><Taches /></AppLayout></ProtectedRoute>} />

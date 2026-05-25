@@ -3209,6 +3209,13 @@ export default function ClientCockpit() {
             >
               📄 Devis
             </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: 'rgba(255,255,255,0.8)', borderColor: 'rgba(255,255,255,0.2)', fontSize: 12 }}
+              onClick={() => navigate(`/clients/${clientId}/micro`)}
+            >
+              🧾 Micro
+            </button>
           </div>
         </div>
 

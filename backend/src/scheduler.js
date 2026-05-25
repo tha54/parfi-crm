@@ -4,6 +4,7 @@ const { syncClient } = require('./routes/powens');
 const { genererFacturesDepuisLDM } = require('./utils/facturation');
 const { injecterTachesLDM } = require('./routes/lettres');
 const ldmService = require('./services/ldmService');
+const { checkAndSendRelances: checkMicroRelances } = require('./routes/micro_relances');
 
 // Réutilise la même logique d'activation que le webhook
 async function activerMissionSiComplete(ldmId) {
@@ -335,7 +336,18 @@ function startScheduler() {
     }
   });
 
-  console.log('[scheduler] Démarré — tache_retard @ 08:00, facture_impayee_30j @ 08:05, figeage_temps @ 02:00, powens_sync @ 03:30, yousign_poll @ toutes les heures');
+  // Daily at 08:10 — send automatic micro-entrepreneur relances
+  cron.schedule('10 8 * * *', async () => {
+    console.log('[scheduler] Running micro-relances check');
+    try {
+      const result = await checkMicroRelances();
+      console.log(`[scheduler] micro-relances: ${result.sent} envoyée(s) sur ${result.processed} facture(s)`);
+    } catch (e) {
+      console.error('[scheduler] micro-relances error:', e.message);
+    }
+  });
+
+  console.log('[scheduler] Démarré — tache_retard @ 08:00, facture_impayee_30j @ 08:05, micro-relances @ 08:10, figeage_temps @ 02:00, powens_sync @ 03:30, yousign_poll @ toutes les heures');
 }
 
 module.exports = { startScheduler };
