@@ -11,6 +11,14 @@ portalApi.interceptors.request.use(cfg => {
   return cfg;
 });
 
+export const crmApi = axios.create({ baseURL: '/api' });
+
+crmApi.interceptors.request.use(cfg => {
+  const token = localStorage.getItem('parfi_micro_portail_token');
+  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  return cfg;
+});
+
 export function MicroPortalAuthProvider({ children }) {
   const [portalUser, setPortalUser] = useState(null);
   const [portalToken, setPortalToken] = useState(null);

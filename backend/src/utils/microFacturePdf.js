@@ -41,8 +41,11 @@ function genererPdfFacture(facture, lignes, paiements = []) {
       doc.fontSize(9).font('Helvetica')
          .text(facture.adresse_facturation.replace(/\n/g, ' • '), 65, 84, { width: W - 130 });
     }
-    if (facture.siren) {
-      doc.fontSize(9).text(`SIREN : ${facture.siren}`, 65, 100, { width: W - 130 });
+    const identifiant = facture.siret
+      ? `SIRET : ${facture.siret}`
+      : (facture.siren ? `SIREN : ${facture.siren}` : null);
+    if (identifiant) {
+      doc.fontSize(9).text(identifiant, 65, 100, { width: W - 130 });
     }
 
     // ── FACTURE label ──────────────────────────────────────────────────────────

@@ -1,11 +1,22 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs').promises;
+const { randomUUID } = require('crypto');
 const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { verifyToken } = require('../middleware/auth');
 const { genererPdfFacture } = require('../utils/microFacturePdf');
 const { genererPdfDevis } = require('../utils/microDevisPdf');
+const { sendEmail } = require('../utils/mailer');
+
+const DEVIS_DIR   = '/opt/parfi-data/micro-devis';
+const FACTURE_DIR = '/opt/parfi-data/micro-factures';
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://163.172.158.24';
+
+fs.mkdir(DEVIS_DIR,   { recursive: true }).catch(() => {});
+fs.mkdir(FACTURE_DIR, { recursive: true }).catch(() => {});
 
 // ── Migration ──────────────────────────────────────────────────────────────────
 ;(async () => {
@@ -176,6 +187,309 @@ router.get('/ca-mensuel', verifyMicroPortalToken, async (req, res) => {
 // DEVIS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTACTS & PRESTATIONS (lecture depuis portail)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+router.get('/contacts', verifyMicroPortalToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM micro_contacts WHERE micro_client_id=? ORDER BY nom',
+      [req.microClientId]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/contacts', verifyMicroPortalToken, async (req, res) => {
+  const { nom, prenom, societe, siren, email, telephone, adresse } = req.body;
+  if (!nom) return res.status(400).json({ error: 'Nom requis' });
+  try {
+    const [r] = await pool.query(
+      'INSERT INTO micro_contacts (micro_client_id, nom, prenom, societe, siren, email, telephone, adresse) VALUES (?,?,?,?,?,?,?,?)',
+      [req.microClientId, nom, prenom||null, societe||null, siren||null, email||null, telephone||null, adresse||null]
+    );
+    const [[row]] = await pool.query('SELECT * FROM micro_contacts WHERE id=?', [r.insertId]);
+    res.status(201).json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/prestations', verifyMicroPortalToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM micro_prestations WHERE micro_client_id=? ORDER BY libelle',
+      [req.microClientId]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DEVIS — CRÉATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /devis/next-numero — DOIT être avant /devis/:id
+router.get('/devis/next-numero', verifyMicroPortalToken, async (req, res) => {
+  try {
+    const [[mc]] = await pool.query('SELECT prefixe_devis FROM micro_clients WHERE id=?', [req.microClientId]);
+    const prefix = mc?.prefixe_devis || 'DEV';
+    const annee = new Date().getFullYear();
+    const [[row]] = await pool.query(
+      `SELECT MAX(CAST(SUBSTRING_INDEX(numero, '-', -1) AS UNSIGNED)) AS max_seq
+       FROM micro_devis WHERE micro_client_id=? AND YEAR(date_emission)=?`,
+      [req.microClientId, annee]
+    );
+    const seq = (row?.max_seq || 0) + 1;
+    res.json({ numero: `${prefix}-${annee}-${String(seq).padStart(4, '0')}` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /devis — créer
+router.post('/devis', verifyMicroPortalToken, async (req, res) => {
+  const { contact_id, numero, date_emission, date_validite, objet, conditions_paiement, notes, taux_tva = 0, lignes = [] } = req.body;
+  if (!contact_id || !numero || !date_emission || !date_validite) {
+    return res.status(400).json({ error: 'contact_id, numero, date_emission, date_validite requis' });
+  }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let montantHT = 0;
+    const lignesCalc = lignes.map((l, i) => {
+      const ht = Number(l.quantite) * Number(l.prix_unitaire) * (1 - (Number(l.remise_pct) || 0) / 100);
+      montantHT += ht;
+      return { ...l, montant_ht: ht, ordre: l.ordre ?? i };
+    });
+    const montantTVA = montantHT * Number(taux_tva) / 100;
+    const montantTTC = montantHT + montantTVA;
+
+    const [r] = await conn.query(
+      `INSERT INTO micro_devis
+         (micro_client_id, contact_id, numero, date_emission, date_validite,
+          objet, conditions_paiement, notes, taux_tva, montant_ht, montant_tva, montant_ttc, statut)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'brouillon')`,
+      [req.microClientId, contact_id, numero, date_emission, date_validite,
+       objet||null, conditions_paiement||null, notes||null, taux_tva, montantHT, montantTVA, montantTTC]
+    );
+    const devisId = r.insertId;
+    for (const l of lignesCalc) {
+      await conn.query(
+        `INSERT INTO micro_devis_lignes (devis_id, libelle, description, quantite, unite, prix_unitaire, remise_pct, montant_ht, ordre)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [devisId, l.libelle, l.description||null, l.quantite, l.unite||'forfait', l.prix_unitaire, l.remise_pct||0, l.montant_ht, l.ordre]
+      );
+    }
+    await conn.commit();
+    const [[devis]] = await pool.query(`
+      SELECT md.*, mc.nom_commercial, mc.siren, mc.siret, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
+             mc.prefixe_devis, c.nom AS client_nom,
+             ct.nom AS contact_nom, ct.prenom AS contact_prenom, ct.societe AS contact_societe,
+             ct.adresse AS contact_adresse, ct.email AS contact_email
+      FROM micro_devis md
+      JOIN micro_clients mc ON mc.id = md.micro_client_id
+      JOIN clients c ON c.id = mc.client_id
+      JOIN micro_contacts ct ON ct.id = md.contact_id
+      WHERE md.id = ?`, [devisId]
+    );
+    const [lignesResult] = await pool.query('SELECT * FROM micro_devis_lignes WHERE devis_id=? ORDER BY ordre', [devisId]);
+    res.status(201).json({ ...devis, lignes: lignesResult });
+  } catch (e) {
+    await conn.rollback();
+    res.status(500).json({ error: e.message });
+  } finally { conn.release(); }
+});
+
+// POST /devis/:id/envoyer
+router.post('/devis/:id/envoyer', verifyMicroPortalToken, async (req, res) => {
+  try {
+    const [[devis]] = await pool.query(`
+      SELECT md.*, mc.nom_commercial, mc.siren, mc.siret, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
+             mc.prefixe_devis, c.nom AS client_nom,
+             ct.nom AS contact_nom, ct.prenom AS contact_prenom, ct.societe AS contact_societe,
+             ct.adresse AS contact_adresse, ct.email AS contact_email
+      FROM micro_devis md
+      JOIN micro_clients mc ON mc.id = md.micro_client_id
+      JOIN clients c ON c.id = mc.client_id
+      JOIN micro_contacts ct ON ct.id = md.contact_id
+      WHERE md.id = ? AND md.micro_client_id = ?`, [req.params.id, req.microClientId]
+    );
+    if (!devis) return res.status(404).json({ error: 'Devis introuvable' });
+    if (!devis.contact_email) return res.status(400).json({ error: 'Le contact n\'a pas d\'adresse email' });
+
+    const [lignes] = await pool.query('SELECT * FROM micro_devis_lignes WHERE devis_id=? ORDER BY ordre', [devis.id]);
+    const pdfBuffer = await genererPdfDevis(devis, lignes);
+    await fs.mkdir(DEVIS_DIR, { recursive: true });
+    const filename = `${devis.numero.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
+    await fs.writeFile(path.join(DEVIS_DIR, filename), pdfBuffer);
+
+    const token = randomUUID();
+    const signatureLink = `${APP_BASE_URL}/signature/${token}`;
+    await pool.query(
+      `UPDATE micro_devis SET statut='envoye', signature_token=?, pdf_url=? WHERE id=?`,
+      [token, `/micro-devis-pdf/${filename}`, devis.id]
+    );
+
+    const nom = devis.nom_commercial || devis.client_nom;
+    await sendEmail({
+      to: devis.contact_email,
+      toName: [devis.contact_prenom, devis.contact_nom].filter(Boolean).join(' '),
+      subject: `Devis ${devis.numero} — ${nom}`,
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:600px;margin:auto">
+          <div style="background:#0F1F4B;padding:24px;border-radius:8px 8px 0 0">
+            <h2 style="color:white;margin:0">${nom}</h2>
+          </div>
+          <div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
+            <p>Bonjour ${devis.contact_prenom || devis.contact_nom || ''},</p>
+            <p>Veuillez trouver ci-joint votre devis <strong>${devis.numero}</strong>${devis.objet ? ` — ${devis.objet}` : ''}.</p>
+            <p><strong>Montant : ${Number(devis.montant_ttc).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</strong></p>
+            <p>Ce devis est valable jusqu'au <strong>${new Date(devis.date_validite).toLocaleDateString('fr-FR')}</strong>.</p>
+            <div style="margin:28px 0;text-align:center">
+              <a href="${signatureLink}" style="background:#0F1F4B;color:white;padding:14px 28px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px">
+                Consulter et signer le devis
+              </a>
+            </div>
+            <p style="font-size:12px;color:#6b7280">Lien : ${signatureLink}</p>
+          </div>
+        </div>`,
+      attachments: [{ base64: pdfBuffer.toString('base64'), filename: `Devis_${devis.numero}.pdf` }],
+    });
+    res.json({ success: true, signature_token: token, signature_link: signatureLink });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FACTURES — CRÉATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /factures/next-numero — DOIT être avant /factures/:id
+router.get('/factures/next-numero', verifyMicroPortalToken, async (req, res) => {
+  try {
+    const [[mc]] = await pool.query('SELECT prefixe_facture FROM micro_clients WHERE id=?', [req.microClientId]);
+    const prefix = mc?.prefixe_facture || 'FAC';
+    const annee = new Date().getFullYear();
+    const [[row]] = await pool.query(
+      `SELECT MAX(CAST(SUBSTRING_INDEX(numero, '-', -1) AS UNSIGNED)) AS max_seq
+       FROM micro_factures WHERE micro_client_id=? AND YEAR(date_emission)=?`,
+      [req.microClientId, annee]
+    );
+    const seq = (row?.max_seq || 0) + 1;
+    res.json({ numero: `${prefix}-${annee}-${String(seq).padStart(4, '0')}` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /factures — créer
+router.post('/factures', verifyMicroPortalToken, async (req, res) => {
+  const { contact_id, numero, date_emission, date_echeance, objet, conditions_paiement, notes, taux_tva = 0, lignes = [] } = req.body;
+  if (!contact_id || !numero || !date_emission || !date_echeance) {
+    return res.status(400).json({ error: 'contact_id, numero, date_emission, date_echeance requis' });
+  }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let montantHT = 0;
+    const lignesCalc = lignes.map((l, i) => {
+      const ht = Number(l.quantite) * Number(l.prix_unitaire) * (1 - (Number(l.remise_pct) || 0) / 100);
+      montantHT += ht;
+      return { ...l, montant_ht: ht, ordre: l.ordre ?? i };
+    });
+    const montantTVA = montantHT * Number(taux_tva) / 100;
+    const montantTTC = montantHT + montantTVA;
+
+    const [[mc]] = await conn.query('SELECT regime_tva FROM micro_clients WHERE id=?', [req.microClientId]);
+    const mention = mc?.regime_tva === 'franchise' ? 'TVA non applicable, art. 293 B du CGI' : null;
+
+    const [r] = await conn.query(
+      `INSERT INTO micro_factures
+         (micro_client_id, contact_id, numero, date_emission, date_echeance,
+          objet, conditions_paiement, notes, taux_tva,
+          montant_ht, montant_tva, montant_ttc, montant_regle, solde_restant, statut, mention_franchise)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,'brouillon',?)`,
+      [req.microClientId, contact_id, numero, date_emission, date_echeance,
+       objet||null, conditions_paiement||null, notes||null, taux_tva,
+       montantHT, montantTVA, montantTTC, montantTTC, mention]
+    );
+    const factureId = r.insertId;
+    for (const l of lignesCalc) {
+      await conn.query(
+        `INSERT INTO micro_factures_lignes (facture_id, libelle, description, quantite, unite, prix_unitaire, remise_pct, montant_ht, ordre)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [factureId, l.libelle, l.description||null, l.quantite, l.unite||'forfait', l.prix_unitaire, l.remise_pct||0, l.montant_ht, l.ordre]
+      );
+    }
+    await conn.commit();
+    const [[facture]] = await pool.query(`
+      SELECT mf.*, mc.nom_commercial, mc.siren, mc.siret, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
+             c.nom AS client_nom,
+             ct.nom AS contact_nom, ct.prenom AS contact_prenom, ct.societe AS contact_societe,
+             ct.adresse AS contact_adresse, ct.email AS contact_email
+      FROM micro_factures mf
+      JOIN micro_clients mc ON mc.id = mf.micro_client_id
+      JOIN clients c ON c.id = mc.client_id
+      JOIN micro_contacts ct ON ct.id = mf.contact_id
+      WHERE mf.id = ?`, [factureId]
+    );
+    const [lignesResult] = await pool.query('SELECT * FROM micro_factures_lignes WHERE facture_id=? ORDER BY ordre', [factureId]);
+    res.status(201).json({ ...facture, lignes: lignesResult });
+  } catch (e) {
+    await conn.rollback();
+    res.status(500).json({ error: e.message });
+  } finally { conn.release(); }
+});
+
+// POST /factures/:id/envoyer
+router.post('/factures/:id/envoyer', verifyMicroPortalToken, async (req, res) => {
+  try {
+    const [[facture]] = await pool.query(`
+      SELECT mf.*, mc.nom_commercial, mc.siren, mc.siret, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
+             mc.prefixe_facture, c.nom AS client_nom,
+             ct.nom AS contact_nom, ct.prenom AS contact_prenom, ct.societe AS contact_societe,
+             ct.adresse AS contact_adresse, ct.email AS contact_email
+      FROM micro_factures mf
+      JOIN micro_clients mc ON mc.id = mf.micro_client_id
+      JOIN clients c ON c.id = mc.client_id
+      JOIN micro_contacts ct ON ct.id = mf.contact_id
+      WHERE mf.id = ? AND mf.micro_client_id = ?`, [req.params.id, req.microClientId]
+    );
+    if (!facture) return res.status(404).json({ error: 'Facture introuvable' });
+    if (!facture.contact_email) return res.status(400).json({ error: 'Le contact n\'a pas d\'adresse email' });
+
+    const [lignes] = await pool.query('SELECT * FROM micro_factures_lignes WHERE facture_id=? ORDER BY ordre', [facture.id]);
+    const pdfBuffer = await genererPdfFacture(facture, lignes, []);
+    await fs.mkdir(FACTURE_DIR, { recursive: true });
+    const filename = `${facture.numero.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
+    await fs.writeFile(path.join(FACTURE_DIR, filename), pdfBuffer);
+
+    await pool.query(
+      `UPDATE micro_factures SET statut='envoyee', pdf_url=? WHERE id=?`,
+      [`/micro-factures-pdf/${filename}`, facture.id]
+    );
+
+    const nom = facture.nom_commercial || facture.client_nom;
+    const echeance = new Date(facture.date_echeance).toLocaleDateString('fr-FR');
+    await sendEmail({
+      to: facture.contact_email,
+      toName: [facture.contact_prenom, facture.contact_nom].filter(Boolean).join(' '),
+      subject: `Facture ${facture.numero} — ${nom}`,
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:600px;margin:auto">
+          <div style="background:#0F1F4B;padding:24px;border-radius:8px 8px 0 0">
+            <h2 style="color:white;margin:0">${nom}</h2>
+          </div>
+          <div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
+            <p>Bonjour ${facture.contact_prenom || facture.contact_nom || ''},</p>
+            <p>Veuillez trouver ci-joint la facture <strong>${facture.numero}</strong>${facture.objet ? ` — ${facture.objet}` : ''}.</p>
+            <p><strong>Montant : ${Number(facture.montant_ttc).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</strong></p>
+            <p>Date d'échéance : <strong>${echeance}</strong></p>
+            ${facture.iban ? `<p>Règlement par virement :<br>IBAN : <strong>${facture.iban}</strong>${facture.bic ? `<br>BIC : <strong>${facture.bic}</strong>` : ''}</p>` : ''}
+            <p style="font-size:12px;color:#6b7280">Pénalités de retard : taux BCE + 10 points. Indemnité forfaitaire de recouvrement : 40 €. TVA non applicable, art. 293 B du CGI.</p>
+          </div>
+        </div>`,
+      attachments: [{ base64: pdfBuffer.toString('base64'), filename: `Facture_${facture.numero}.pdf` }],
+    });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/micro-portail/devis
 router.get('/devis', verifyMicroPortalToken, async (req, res) => {
   try {
@@ -214,7 +528,7 @@ router.get('/devis/:id', verifyMicroPortalToken, async (req, res) => {
 router.get('/devis/:id/pdf', verifyMicroPortalToken, async (req, res) => {
   try {
     const [[devis]] = await pool.query(
-      `SELECT md.*, mc.nom_commercial, mc.siren, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
+      `SELECT md.*, mc.nom_commercial, mc.siren, mc.siret, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
               mc.prefixe_devis, c.nom AS client_nom,
               ct.nom AS contact_nom, ct.prenom AS contact_prenom, ct.societe AS contact_societe, ct.adresse AS contact_adresse
        FROM micro_devis md
@@ -256,7 +570,7 @@ router.get('/factures', verifyMicroPortalToken, async (req, res) => {
 router.get('/factures/:id', verifyMicroPortalToken, async (req, res) => {
   try {
     const [[facture]] = await pool.query(
-      `SELECT mf.*, mc.nom_commercial, mc.siren, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
+      `SELECT mf.*, mc.nom_commercial, mc.siren, mc.siret, mc.adresse_facturation, mc.regime_tva, mc.iban, mc.bic,
               c.nom AS client_nom, ct.nom AS contact_nom, ct.prenom AS contact_prenom,
               ct.societe AS contact_societe, ct.adresse AS contact_adresse, ct.email AS contact_email
        FROM micro_factures mf

@@ -60,6 +60,8 @@ import MicroPortalDashboard from './pages/MicroPortalDashboard';
 import { MicroPortalDevisList, MicroPortalDevisDetail } from './pages/MicroPortalDevis';
 import { MicroPortalFacturesList, MicroPortalFactureDetail } from './pages/MicroPortalFactures';
 import MicroPortalLivreRecettes from './pages/MicroPortalLivreRecettes';
+import MicroPortalDevisForm from './pages/MicroPortalDevisForm';
+import MicroPortalFactureForm from './pages/MicroPortalFactureForm';
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -118,8 +120,10 @@ function AppRoutes() {
       <Route path="/micro-portail/login" element={<MicroPortalLogin />} />
       <Route path="/micro-portail/dashboard" element={<ProtectedMicroPortalRoute><MicroPortalDashboard /></ProtectedMicroPortalRoute>} />
       <Route path="/micro-portail/devis" element={<ProtectedMicroPortalRoute><MicroPortalDevisList /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/devis/nouveau" element={<ProtectedMicroPortalRoute><MicroPortalDevisForm /></ProtectedMicroPortalRoute>} />
       <Route path="/micro-portail/devis/:id" element={<ProtectedMicroPortalRoute><MicroPortalDevisDetail /></ProtectedMicroPortalRoute>} />
       <Route path="/micro-portail/factures" element={<ProtectedMicroPortalRoute><MicroPortalFacturesList /></ProtectedMicroPortalRoute>} />
+      <Route path="/micro-portail/factures/nouvelle" element={<ProtectedMicroPortalRoute><MicroPortalFactureForm /></ProtectedMicroPortalRoute>} />
       <Route path="/micro-portail/factures/:id" element={<ProtectedMicroPortalRoute><MicroPortalFactureDetail /></ProtectedMicroPortalRoute>} />
       <Route path="/micro-portail/livre-recettes" element={<ProtectedMicroPortalRoute><MicroPortalLivreRecettes /></ProtectedMicroPortalRoute>} />
       <Route path="/micro-portail" element={<Navigate to="/micro-portail/login" replace />} />

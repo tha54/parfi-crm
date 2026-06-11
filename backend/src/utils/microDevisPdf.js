@@ -38,8 +38,11 @@ function genererPdfDevis(devis, lignes) {
       doc.fontSize(9).font('Helvetica')
          .text(devis.adresse_facturation.replace(/\n/g, ' • '), 65, 84, { width: W - 130 });
     }
-    if (devis.siren) {
-      doc.fontSize(9).text(`SIREN : ${devis.siren}`, 65, 100, { width: W - 130 });
+    const identifiant = devis.siret
+      ? `SIRET : ${devis.siret}`
+      : (devis.siren ? `SIREN : ${devis.siren}` : null);
+    if (identifiant) {
+      doc.fontSize(9).text(identifiant, 65, 100, { width: W - 130 });
     }
 
     // ── DEVIS label (top right) ────────────────────────────────────────────────
@@ -196,12 +199,17 @@ function genererPdfDevis(devis, lignes) {
     doc.fillColor(GRAY).fontSize(9).font('Helvetica')
        .text('Montant total', 400, y + 38, { width: 145, align: 'right' });
 
-    // ── Pied de page ──────────────────────────────────────────────────────────
+    // ── Pied de page légal ────────────────────────────────────────────────────
+    const footerY = 790;
+    doc.moveTo(50, footerY).lineTo(545, footerY).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+    const legalFooter = [
+      `Devis valable jusqu'au ${fmtDate(devis.date_validite)}.`,
+      `En cas de retard de paiement, des pénalités de retard seront exigibles au taux directeur de la BCE majoré de 10 points`,
+      `(art. L. 441-6 C.com.), ainsi qu'une indemnité forfaitaire pour frais de recouvrement de 40 € (décret n° 2012-1115).`,
+      `Pas d'escompte pour paiement anticipé.`,
+    ].join(' ');
     doc.fillColor(GRAY).fontSize(7).font('Helvetica')
-       .text(
-         `Devis valable jusqu'au ${fmtDate(devis.date_validite)} · En cas de litige : pénalités de retard au taux légal + indemnité forfaitaire de 40 €`,
-         50, 800, { width: W, align: 'center' }
-       );
+       .text(legalFooter, 50, footerY + 5, { width: W, align: 'justify' });
 
     doc.end();
   });

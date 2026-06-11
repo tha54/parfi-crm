@@ -136,3 +136,34 @@ CRM cabinet Parfi France (Longwy). Stack : React + Vite (nginx /dist), Express.j
 - `config_relances_auto.factureId` est UNIQUE → upsert via `ON DUPLICATE KEY UPDATE`
 - SEPA XML utilise IBAN placeholder client (non stocké en DB) : `FRXX XXXX XXXX XXXX XXXX XXXX XXX`
 - `parametres.js` routes clauses/modeles : soft delete avec `actif=0` (pas de DELETE réel)
+
+### Session 8 — Portail micro-entrepreneur : formulaires devis & factures (sprint 7)
+**Fait :**
+- **`MicroPortalDevisForm.jsx`** (nouveau) — wizard 4 étapes pour créer un devis depuis le portail micro :
+  - Étape 1 Contact : sélection depuis `micro_contacts` + bouton "Créer nouveau contact"
+  - Étape 2 Prestations : lignes (libellé, description, quantité, unité, prix unitaire, remise %)
+  - Étape 3 Conditions : taux TVA, conditions de paiement, notes, dates (émission + validité)
+  - Étape 4 Aperçu & Envoi : récap totaux HT/TVA/TTC + boutons "Enregistrer brouillon" / "📧 Envoyer"
+  - Route : `/micro-portail/devis/nouveau`
+- **`MicroPortalFactureForm.jsx`** (nouveau) — wizard 4 étapes pour créer une facture (Contact / Lignes / Conditions / Aperçu)
+  - Route : `/micro-portail/factures/nouvelle`
+- **`backend/src/routes/micro_portail.js`** — nouvelles routes :
+  - `GET /contacts` + `POST /contacts` — lecture/création contacts du micro-client
+  - `GET /prestations` — catalogue prestations du micro-client
+  - `GET /devis/next-numero` — numérotation auto (préfixe `micro_clients.prefixe_devis` + année + séquence 4 chiffres)
+  - `POST /devis` — création devis + lignes en transaction, calcul montantHT/TVA/TTC
+  - `POST /devis/:id/envoyer` — génération PDF + envoi email + statut → envoyé
+  - `GET /factures/next-numero` — numérotation auto factures
+  - `POST /factures` — création facture + lignes en transaction
+  - `POST /factures/:id/envoyer` — génération PDF + envoi email + statut → envoyée
+  - Dossiers persistance PDF : `/opt/parfi-data/micro-devis` et `/opt/parfi-data/micro-factures` (créés automatiquement)
+- **`MicroPortalDevis.jsx`** modifié : bouton "+ Nouveau devis" → `/micro-portail/devis/nouveau`, badge renommé `StatutBadge`, affichage contact (société ou prénom+nom), actions inline "📧 Envoyer" (brouillon) / "✅ Accepter" / "❌ Refuser" (envoyé)
+- **`MicroPortalFactures.jsx`** modifié : bouton "+ Nouvelle facture" + actions envoyer/valider
+- **`App.jsx`** — routes `/micro-portail/devis/nouveau` et `/micro-portail/factures/nouvelle` ajoutées
+- **`microDevisPdf.js` / `microFacturePdf.js`** — corrections mineures pour compatibilité envoi email
+
+**Notes :**
+- `micro_contacts` colonnes : `id`, `micro_client_id`, `nom`, `prenom`, `societe`, `siren`, `email`, `telephone`, `adresse`
+- `micro_devis_lignes` colonnes : `id`, `devis_id`, `libelle`, `description`, `quantite`, `unite`, `prix_unitaire`, `remise_pct`, `montant_ht`, `ordre`
+- `micro_factures_lignes` : même structure avec `facture_id` à la place de `devis_id`
+- Route `GET /devis/next-numero` **doit** être déclarée avant `GET /devis/:id` dans le fichier (sinon Express interprète "next-numero" comme un `:id`)
