@@ -84,10 +84,16 @@ const SECTION_TO_TYPE = {
   conseil:            'conseil',
 };
 
-// Taux par profil (D11)
-const TAUX_PAR_PROFIL = { expert: 84, chef_mission: 58, collaborateur: 40, assistant: 28 };
+// Anciens INTERVENANT_TO_PROFIL et TAUX_PAR_PROFIL supprimés par le
+// chantier F (refonte dimensionnement). Le budget est désormais porté par
+// budget_ligne, avec grade = junior|medior|senior|chef_mission|expert_comptable
+// et taux dérivé de taux_grade au moment de la création (figé ensuite).
+// buildMissionsFromLignes ne calcule plus de profils : les missions sont
+// créées vides côté budget, la saisie se fait via l'écran ou via
+// production/budget.js#creerLigne.
 
-// Mapping intervenant lignes_devis → profil
+// Mapping conservé pour compat historique (référencé dans le grep ci-dessous)
+// mais ne sert plus à la construction du INSERT ldm_missions.
 const INTERVENANT_TO_PROFIL = {
   'Expert-comptable': 'expert',
   'Chef de groupe':   'expert',
@@ -213,24 +219,16 @@ function buildMissionsFromLignes(lignesDevis, datePriseEffet) {
   const missions = [];
   let ordre = 0;
   for (const [type, { lignes, libelles }] of Object.entries(grouped)) {
-    // Agréger heures par profil
-    const heuresParProfil = { expert: 0, chef_mission: 0, collaborateur: 0, assistant: 0 };
+    // Somme honoraires depuis les lignes du devis. Les profils JSON ne sont
+    // plus renseignés (colonnes supprimées, chantier F) — le vrai budget par
+    // grade viendra via budget_ligne.
     let honorairesHT = 0;
     for (const l of lignes) {
-      const profil = INTERVENANT_TO_PROFIL[l.intervenant] || 'collaborateur';
-      const minutes = parseFloat(l.temps_minutes || 0);
-      heuresParProfil[profil] += minutes / 60;
       honorairesHT += parseFloat(l.tarif_ht || l.totalHT || 0);
-    }
-    // Arrondir à 2 décimales
-    for (const k of Object.keys(heuresParProfil)) {
-      heuresParProfil[k] = Math.round(heuresParProfil[k] * 100) / 100;
     }
     missions.push({
       type_mission: type,
       libelle: Array.from(libelles).slice(0, 3).join(', ') || type.replace(/_/g, ' '),
-      nombre_heures_par_profil: heuresParProfil,
-      taux_par_profil: { ...TAUX_PAR_PROFIL },
       honoraires_ht: Math.round(honorairesHT * 100) / 100,
       date_debut: datePriseEffet || new Date().toISOString().split('T')[0],
       date_fin: null,
@@ -304,34 +302,13 @@ async function genererDepuisDevis(devisId, acteurId, acteurNom) {
   );
   if (existing) return { ldm: existing, created: false };
 
-  // ── Auto-conversion prospect → client si le devis est lié à un prospect ──
-  if (!devis.client_id && devis.prospect_id) {
-    const [[prospect]] = await pool.query(
-      'SELECT * FROM prospects WHERE id = ?', [devis.prospect_id]
-    );
-    if (prospect) {
-      let resolvedClientId = prospect.client_id;
-      if (!resolvedClientId) {
-        // Mapping type prospect → type client
-        const TYPE_MAP = { sci: 'SCI', association: 'Association', entreprise: 'BIC', particulier: 'BNC' };
-        const clientType = TYPE_MAP[prospect.segment] || TYPE_MAP[prospect.type_prospect] || 'Autre';
-        const [insClient] = await pool.query(
-          `INSERT INTO clients (nom, siren, type, regime, adresse, code_postal, ville, forme_juridique)
-           VALUES (?, ?, ?, 'mensuel', ?, ?, ?, ?)`,
-          [prospect.nom, prospect.siren || null, clientType,
-           prospect.adresse || null, prospect.code_postal || null,
-           prospect.ville || null, prospect.forme_juridique || null]
-        );
-        resolvedClientId = insClient.insertId;
-        await pool.query(
-          `UPDATE prospects SET statut = 'converti', client_id = ? WHERE id = ?`,
-          [resolvedClientId, prospect.id]
-        );
-      }
-      devis.client_id = resolvedClientId;
-      await pool.query('UPDATE devis SET client_id = ? WHERE id = ?', [resolvedClientId, devisId]);
-    }
-  }
+  // La conversion prospect → client est reportée à la SIGNATURE de la LDM
+  // (voir promouvoirProspectSiBesoin appelé dans le hook 'signer' de
+  // transitionner). Règle métier : un prospect ne devient client qu'à la
+  // signature d'une lettre de mission — pas à la simple acceptation d'un
+  // devis, qui n'engage pas encore contractuellement. Chemin unique.
+  // La LDM en brouillon est donc créée avec (client_id=null, prospect_id=X)
+  // ; les deux colonnes seront réalignées à la signature.
 
   // Snapshots
   const snapshotClient  = await buildSnapshotClient(devis.client_id, devis.prospect_id);
@@ -413,16 +390,21 @@ async function genererDepuisDevis(devisId, acteurId, acteurNom) {
     );
     const ldmId = ins.insertId;
 
-    // Missions détaillées
+    // Missions détaillées — les colonnes nombre_heures_par_profil et
+    // taux_par_profil ont été supprimées par le chantier F. Le budget d'une
+    // mission est désormais porté par budget_ligne (une ligne = un code_temps
+    // + un grade + une quantité + une périodicité), et honoraires_ht est un
+    // cache dénormalisé calculé par production/budget.js. À ce stade de la
+    // création, aucune budget_ligne n'existe encore — honoraires_ht reste à
+    // 0 et sera renseigné à la saisie du budget côté écran (hors périmètre
+    // du chantier F).
     for (const m of missionsData) {
       await conn.query(
         `INSERT INTO ldm_missions
-           (lettre_mission_id, type_mission, libelle, nombre_heures_par_profil,
-            taux_par_profil, honoraires_ht, date_debut, date_fin, ordre)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+           (lettre_mission_id, type_mission, libelle,
+            honoraires_ht, date_debut, date_fin, ordre)
+         VALUES (?,?,?,?,?,?,?)`,
         [ldmId, m.type_mission, m.libelle,
-         JSON.stringify(m.nombre_heures_par_profil),
-         JSON.stringify(m.taux_par_profil),
          m.honoraires_ht, m.date_debut, m.date_fin, m.ordre]
       );
     }
@@ -441,6 +423,22 @@ async function genererDepuisDevis(devisId, acteurId, acteurNom) {
     await conn.query(
       `UPDATE devis SET verrouille = 1, ldm_generee_id = ? WHERE id = ?`,
       [ldmId, devisId]
+    );
+
+    // Chapitres + totaux (aligné sur ce que faisait /convertir-ldm — la
+    // divergence historique entre /accepter et /convertir-ldm est effacée).
+    await conn.query('DELETE FROM lettres_mission_chapitres WHERE ldm_id = ?', [ldmId]);
+    const [chapRows] = await conn.query('SELECT * FROM devis_chapitres WHERE devis_id = ?', [devisId]);
+    for (const r of chapRows) {
+      await conn.query(
+        `INSERT INTO lettres_mission_chapitres (ldm_id, chapitre, total_theorique_ht, montant_accepte_ht, remise_ht)
+         VALUES (?, ?, ?, ?, ?)`,
+        [ldmId, r.chapitre, r.total_theorique_ht, r.montant_accepte_ht, r.remise_ht]
+      );
+    }
+    await conn.query(
+      `UPDATE lettres_mission SET total_theorique_ht=?, remise_commerciale_ht=?, total_accepte_ht=? WHERE id=?`,
+      [devis.total_theorique_ht, devis.remise_commerciale_ht, devis.total_accepte_ht, ldmId]
     );
 
     // Événement CREATION
@@ -585,7 +583,71 @@ async function transitionner(ldmId, action, acteurRole, acteurId, acteurNom, opt
 
   // ── Post-traitements ──────────────────────────────────────────────────────
   if (action === 'signer') {
-    // Activation automatique
+    // Règle métier : la signature LDM est la SEULE voie de promotion
+    // prospect → client. Elle déclenche aussi la création du dossier de
+    // production et la génération des premières périodes. Chaque étape est
+    // isolée dans son try/catch : une erreur sur les post-triggers ne doit
+    // pas invalider la signature elle-même (déjà enregistrée en base).
+    let promotedClientId = null;
+    try {
+      promotedClientId = await promouvoirProspectSiBesoin(ldmId);
+    } catch (e) { console.error('[promotion] promouvoirProspect:', e.message); }
+
+    let dossierId = null;
+    if (promotedClientId) {
+      try {
+        dossierId = await creerDossierProductionSiBesoin(promotedClientId);
+      } catch (e) { console.error('[promotion] creerDossier:', e.message); }
+    }
+
+    if (dossierId) {
+      try {
+        await rattacherMissionsAuDossier(ldmId, dossierId);
+      } catch (e) { console.error('[promotion] rattacherMissions:', e.message); }
+      try {
+        const r = await genererPeriodesPourLdm(ldmId);
+        console.log(`[promotion] LDM ${ldmId} signée → dossier ${dossierId}, ${r.totalPeriodes} période(s), ${r.totalTaches} tâche(s)`);
+      } catch (e) { console.error('[promotion] genererPeriodes:', e.message); }
+
+      // RG-50 — création automatique de l'onboarding et instanciation des
+      // étapes E01..E27. Idempotent : UNIQUE (dossier_id) sur onboarding
+      // empêche tout doublon. reprise_confrere reste à 0 tant que la
+      // colonne opportunites.suivi_par_confrere n'est pas ajoutée (chantier
+      // ultérieur RG-48). L'utilisateur pourra la basculer à la main en
+      // attendant.
+      try {
+        const { creerOnboardingSiBesoin, instancierEtapesOnboarding } =
+          require('../production/onboarding');
+        const [[dossierRow]] = await pool.query(
+          `SELECT id, profils FROM dossier WHERE id = ?`, [dossierId]
+        );
+        const onbId = await creerOnboardingSiBesoin(dossierId, {
+          dateSignature: new Date().toISOString().slice(0, 10),
+          creePar: acteurId || null,
+        });
+        const nbEtapes = await instancierEtapesOnboarding(onbId, dossierRow);
+        console.log(`[promotion] onboarding ${onbId} — ${nbEtapes} étape(s) instanciée(s)`);
+
+        // Chantier G — rattachement rétroactif des mandats du client à cet
+        // onboarding. La chaîne signature peut avoir créé un mandat SEPA
+        // AVANT que l'onboarding n'existe (ordonnancement des étapes de
+        // transitionner). On rattache ici tous les mandats du client qui
+        // n'ont pas encore d'onboarding_id.
+        const [rmandats] = await pool.query(
+          `UPDATE mandats m
+             JOIN lettres_mission lm ON lm.id = m.ldm_id
+              SET m.onboarding_id = ?
+            WHERE lm.client_id = ?
+              AND m.onboarding_id IS NULL`,
+          [onbId, promotedClientId]
+        );
+        if (rmandats.affectedRows > 0) {
+          console.log(`[promotion] onboarding ${onbId} — ${rmandats.affectedRows} mandat(s) rattaché(s)`);
+        }
+      } catch (e) { console.error('[promotion] onboarding:', e.message); }
+    }
+
+    // Activation automatique (comportement conservé)
     await transitionner(ldmId, 'activer', acteurRole, acteurId, acteurNom, {
       commentaire: 'Activation automatique après signature',
     });
@@ -687,6 +749,118 @@ async function mettreAJourTableauRepartition(ldmId, acteurRole, acteurId, acteur
   return lignes;
 }
 
+// ── SIGNATURE : promotion prospect → client et création dossier de prod ─────
+// Ces fonctions sont appelées par le hook 'signer' de transitionner (voir
+// plus haut). Elles matérialisent la règle métier : « un prospect ne devient
+// client qu'à la signature d'une LDM ». Chemin unique.
+
+async function promouvoirProspectSiBesoin(ldmId, connexion = null) {
+  const conn = connexion || pool;
+  const [[ldm]] = await conn.query('SELECT * FROM lettres_mission WHERE id = ?', [ldmId]);
+  if (!ldm) return null;
+  if (ldm.client_id) return ldm.client_id; // déjà rattaché à un client
+  if (!ldm.prospect_id) return null;       // LDM sans prospect ni client (edge case)
+
+  const [[prospect]] = await conn.query('SELECT * FROM prospects WHERE id = ?', [ldm.prospect_id]);
+  if (!prospect) return null;
+
+  let clientId = prospect.client_id;
+  if (!clientId) {
+    const TYPE_MAP = { sci: 'SCI', association: 'Association', entreprise: 'BIC', particulier: 'BNC' };
+    const clientType = TYPE_MAP[prospect.segment] || TYPE_MAP[prospect.type_prospect] || 'Autre';
+    const [ins] = await conn.query(
+      `INSERT INTO clients (nom, siren, type, regime, adresse, code_postal, ville, forme_juridique)
+       VALUES (?, ?, ?, 'mensuel', ?, ?, ?, ?)`,
+      [prospect.nom, prospect.siren || null, clientType,
+       prospect.adresse || null, prospect.code_postal || null,
+       prospect.ville || null, prospect.forme_juridique || null]
+    );
+    clientId = ins.insertId;
+    await conn.query(
+      `UPDATE prospects SET statut = 'converti', client_id = ? WHERE id = ?`,
+      [clientId, prospect.id]
+    );
+  }
+
+  // Réaligner la LDM et son devis source sur le client réel.
+  await conn.query('UPDATE lettres_mission SET client_id = ? WHERE id = ?', [clientId, ldmId]);
+  if (ldm.devis_id) {
+    await conn.query('UPDATE devis SET client_id = ? WHERE id = ?', [clientId, ldm.devis_id]);
+  }
+  return clientId;
+}
+
+async function creerDossierProductionSiBesoin(clientId, connexion = null) {
+  const conn = connexion || pool;
+  const [[existing]] = await conn.query('SELECT id FROM dossier WHERE client_id = ?', [clientId]);
+  if (existing) return existing.id;
+
+  const [[client]] = await conn.query('SELECT * FROM clients WHERE id = ?', [clientId]);
+  if (!client) return null;
+
+  // Cohérent avec les valeurs d'amorçage de chantier3-04 :
+  //   classe='B', profils=['T'], scores null, cotation_faite=0,
+  //   materialite = max(500, ca_annuel * 1%), régime TVA dérivé.
+  const caReference = client.ca_mensuel_signe ? Math.round(Number(client.ca_mensuel_signe) * 12) : null;
+  const materialite = Math.max(500, caReference ? Math.round(caReference * 0.01) : 0) || 500;
+
+  let jourCloture = null, moisCloture = null;
+  if (client.date_cloture) {
+    const d = new Date(client.date_cloture);
+    if (!isNaN(d.getTime())) { jourCloture = d.getUTCDate(); moisCloture = d.getUTCMonth() + 1; }
+  }
+
+  let regimeTva = null;
+  if (client.regime_tva === 'franchise' || client.regime_tva === 'hors_champ') regimeTva = 'franchise';
+  else if (client.regime_tva === 'reel_simplifie') regimeTva = 'reel_simplifie';
+  else if (client.regime_tva === 'reel_normal') {
+    regimeTva = client.periodicite_tva === 'mensuelle' ? 'reel_normal_mensuel' : 'reel_normal_trimestriel';
+  }
+
+  const [ins] = await conn.query(
+    `INSERT INTO dossier
+       (client_id, raison_sociale, siren, forme_juridique,
+        jour_cloture, mois_cloture, regime_tva,
+        classe, profils, score_risque, score_complexite, cotation_faite,
+        materialite, ca_reference, statut)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'B', ?, NULL, NULL, 0, ?, ?, 'actif')`,
+    [clientId, client.raison_sociale || client.nom,
+     client.siren && client.siren.length === 9 ? client.siren : null,
+     client.forme_juridique,
+     jourCloture, moisCloture, regimeTva,
+     JSON.stringify(['T']), materialite, caReference]
+  );
+  return ins.insertId;
+}
+
+async function rattacherMissionsAuDossier(ldmId, dossierId, connexion = null) {
+  const conn = connexion || pool;
+  await conn.query(
+    `UPDATE ldm_missions SET dossier_id = ?
+      WHERE lettre_mission_id = ? AND dossier_id IS NULL`,
+    [dossierId, ldmId]
+  );
+}
+
+async function genererPeriodesPourLdm(ldmId) {
+  // Import différé pour éviter tout cycle avec le module production.
+  const { genererPeriodes } = require('../production/generer-periodes');
+  const [missions] = await pool.query(
+    `SELECT id FROM ldm_missions
+      WHERE lettre_mission_id = ?
+        AND genere_production = 1
+        AND statut_production = 'active'`,
+    [ldmId]
+  );
+  let totalPeriodes = 0, totalTaches = 0;
+  for (const m of missions) {
+    const r = await genererPeriodes(pool, { missionId: m.id });
+    totalPeriodes += r.periodesCreees;
+    totalTaches   += r.tachesCreees;
+  }
+  return { totalPeriodes, totalTaches };
+}
+
 module.exports = {
   genererDepuisDevis,
   transitionner,
@@ -695,6 +869,10 @@ module.exports = {
   logEvenement,
   nextNumeroLDM,
   buildTableauRepartition,
+  promouvoirProspectSiBesoin,
+  creerDossierProductionSiBesoin,
+  rattacherMissionsAuDossier,
+  genererPeriodesPourLdm,
   LIGNES_PAR_MISSION,
   LIGNES_TRONC_COMMUN,
 };

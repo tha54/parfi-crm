@@ -20,6 +20,7 @@ const missionsRoutes = require('./routes/missions');
 const intervenantsRoutes = require('./routes/intervenants');
 const relancesRoutes = require('./routes/relances');
 const parametresRoutes = require('./routes/parametres');
+const cataloguePrestationsRoutes = require('./routes/catalogue_prestations');
 const rentabiliteRoutes = require('./routes/rentabilite');
 const interactionsRoutes = require('./routes/interactions');
 const documentsRoutes = require('./routes/documents');
@@ -43,6 +44,7 @@ const absencesRoutes = require('./routes/absences');
 const rapportsRoutes = require('./routes/rapports');
 const dimensionnementRoutes = require('./routes/dimensionnement');
 const chifrageRoutes = require('./routes/chiffrage');
+const budgetLigneRoutes = require('./routes/budget-ligne');
 const portefeuilleRoutes = require('./routes/portefeuille');
 const chargeTravailRoutes = require('./routes/chargeTravail');
 const activiteRoutes = require('./routes/activite');
@@ -56,6 +58,8 @@ const microDevisRoutes = require('./routes/micro_devis');
 const microFacturesRoutes = require('./routes/micro_factures');
 const { router: microRelancesRoutes } = require('./routes/micro_relances');
 const microPortailRoutes = require('./routes/micro_portail');
+const mandatsRoutes = require('./routes/mandats');
+const onboardingRoutes = require('./routes/onboarding');
 
 const { startScheduler } = require('./scheduler');
 
@@ -109,6 +113,7 @@ app.use('/api/missions', missionsRoutes);
 app.use('/api/intervenants', intervenantsRoutes);
 app.use('/api/relances', relancesRoutes);
 app.use('/api/parametres', parametresRoutes);
+app.use('/api/catalogue-prestations', cataloguePrestationsRoutes);
 app.use('/api/rentabilite', rentabiliteRoutes);
 app.use('/api/charge-travail', chargeTravailRoutes);
 app.use('/api/interactions', interactionsRoutes);
@@ -133,6 +138,7 @@ app.use('/api/absences', absencesRoutes);
 app.use('/api/rapports', rapportsRoutes);
 app.use('/api/dimensionnement', dimensionnementRoutes);
 app.use('/api/chiffrage', chifrageRoutes);
+app.use('/api/budget-ligne', budgetLigneRoutes);
 app.use('/api/portefeuille', portefeuilleRoutes);
 app.use('/api/activite-cabinet', activiteRoutes);
 app.use('/api/alertes-facturation', alertesFacturationRoutes);
@@ -144,6 +150,19 @@ app.use('/api/micro-devis', microDevisRoutes);
 app.use('/api/micro-factures', microFacturesRoutes);
 app.use('/api/micro-relances', microRelancesRoutes);
 app.use('/api/micro-portail', microPortailRoutes);
+app.use('/api/mandats', mandatsRoutes);
+app.use('/api/onboarding', onboardingRoutes);
+
+// DEV_USER_SWITCH — sélecteur de vues de développement.
+// Chargement conditionnel : le require n'est pas atteint en production.
+// Le module lui-même refait une vérification NODE_ENV avant de wire les
+// routes. Le dossier backend/src/dev-user-switch/ est exclu de l'artefact
+// de déploiement (voir son README.md).
+if (process.env.NODE_ENV !== 'production') {
+  try { require('./dev-user-switch/install')(app); }
+  catch (e) { console.warn('[DEV_USER_SWITCH] non chargé:', e.message); }
+}
+
 app.use('/micro-factures-pdf', express.static('/opt/parfi-data/micro-factures'));
 app.post('/api/webhooks/powens', powensWebhook);
 

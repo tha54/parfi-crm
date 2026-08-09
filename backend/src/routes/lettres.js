@@ -19,7 +19,10 @@ function groupByRubrique(lignes) {
   return Array.from(map.values());
 }
 
-function generateLDMHTML(ldm, lignesGrouped, mandats, cabinet) {
+// mandats retiré des paramètres : depuis le chantier G, les mandats sont des
+// annexes d'onboarding et ne figurent plus dans le PDF de la LDM. Le paramètre
+// est conservé pour ne pas casser les appelants (ignoré).
+function generateLDMHTML(ldm, lignesGrouped, _mandats, cabinet) {
   const fmt = (n) => Number(n || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const rubriquesHTML = lignesGrouped.map((rub, idx) => {
@@ -44,22 +47,6 @@ function generateLDMHTML(ldm, lignesGrouped, mandats, cabinet) {
   const mensuel = Math.round((ldm.montantHonorairesHT || 0) / 12 * 100) / 100;
   const tva = Math.round((ldm.montantHonorairesHT || 0) * 0.2 * 100) / 100;
   const ttc = Math.round(((ldm.montantHonorairesHT || 0) + tva) * 100) / 100;
-
-  const mandatsHTML = mandats && mandats.length ? `
-    <h2>Mandats</h2>
-    <table><thead><tr style="background:#1a3a5c;color:#fff;">
-      <th style="padding:8px;text-align:left;">Type</th>
-      <th style="padding:8px;text-align:left;">Libellé</th>
-      <th style="padding:8px;text-align:center;">Signé</th>
-      <th style="padding:8px;text-align:left;">Date</th>
-    </tr></thead><tbody>${mandats.map(m => `
-      <tr style="border-bottom:1px solid #eee;">
-        <td style="padding:8px;">${m.type}</td>
-        <td style="padding:8px;">${m.libelle}</td>
-        <td style="padding:8px;text-align:center;">${m.signe ? '✓' : '—'}</td>
-        <td style="padding:8px;">${m.date_signature ? new Date(m.date_signature).toLocaleDateString('fr-FR') : '—'}</td>
-      </tr>`).join('')}
-    </tbody></table>` : '';
 
   const dateDebut        = ldm.dateDebut             ? new Date(ldm.dateDebut).toLocaleDateString('fr-FR')             : '—';
   const datePremiereFacture = ldm.date_premiere_facture ? new Date(ldm.date_premiere_facture).toLocaleDateString('fr-FR') : null;
@@ -146,8 +133,6 @@ function toggle(idx){
     ${datePremiereFacture ? `<tr><td style="color:#555;font-size:0.9em;">Date de 1ère facturation</td><td style="text-align:right;font-size:0.9em;font-weight:600;">${datePremiereFacture}</td></tr>` : ''}
     ${ldm.periodicite_facturation ? `<tr><td style="color:#555;font-size:0.9em;">Périodicité de facturation</td><td style="text-align:right;font-size:0.9em;font-weight:600;">${PERIO_LABEL[ldm.periodicite_facturation] || ldm.periodicite_facturation}</td></tr>` : ''}
   </tbody></table>
-
-  ${mandatsHTML}
 
   <h2>Clauses contractuelles</h2>
   <div class="clause"><strong>Révision des honoraires</strong><br>Les honoraires sont révisés chaque année au 1er janvier selon l'indice INSEE du coût de la vie. Toute modification substantielle de la mission fera l'objet d'un avenant.</div>
@@ -560,11 +545,13 @@ router.get('/:id', verifyToken, async (req, res) => {
     const [[l]] = await pool.query(
       `SELECT l.*, c.nom AS client_nom, c.siren AS client_siren,
               u.prenom AS collab_prenom, u.nom AS collab_nom,
-              cm.prenom AS chef_prenom, cm.nom AS chef_nom, cm.role_metier AS chef_role_metier
+              cm.prenom AS chef_prenom, cm.nom AS chef_nom, cm.role_metier AS chef_role_metier,
+              d.id AS dossier_id
        FROM lettres_mission l
        LEFT JOIN clients c ON l.client_id = c.id
        LEFT JOIN utilisateurs u ON l.collaborateur_id = u.id
        LEFT JOIN utilisateurs cm ON l.chef_mission_id = cm.id
+       LEFT JOIN dossier d ON d.client_id = l.client_id
        WHERE l.id = ?`, [req.params.id]
     );
     if (!l) return res.status(404).json({ message: 'Lettre introuvable' });
@@ -606,16 +593,24 @@ router.post('/', verifyToken, requireRole('expert', 'chef_mission'), async (req,
 router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   const { statut, typeMission, objetMission, montantHonorairesHT, dateDebut, dateFin, client_id,
           signatureClient, dateSignatureClient,
-          periodicite_facturation, date_premiere_facture } = req.body;
+          periodicite_facturation, date_premiere_facture,
+          jour_prelevement, mode_reglement, mandat_edi, mandat_social,
+          presentation_client, perimetre_mission, courrier_accompagnement } = req.body;
   try {
-    // Récupérer l'ancien statut
-    const [[prev]] = await pool.query('SELECT statut FROM lettres_mission WHERE id=?', [req.params.id]);
+    // Récupérer l'ancien statut ET le lien devis (source de vérité des rubriques/montant)
+    const [[prev]] = await pool.query('SELECT statut, devis_id FROM lettres_mission WHERE id=?', [req.params.id]);
 
     const fields = [], values = [];
     if (statut !== undefined) { fields.push('statut = ?'); values.push(statut); }
     if (typeMission !== undefined) { fields.push('typeMission = ?'); values.push(typeMission); }
     if (objetMission !== undefined) { fields.push('objetMission = ?'); values.push(objetMission); }
-    if (montantHonorairesHT !== undefined) { fields.push('montantHonorairesHT = ?'); values.push(montantHonorairesHT); }
+    // Règle métier (chantier C) : les rubriques et le montant total refletent
+    // le devis figé. Toute tentative de modification via ce PUT est ignorée
+    // silencieusement quand la LDM a été générée depuis un devis. Pour
+    // changer le prix, il faut refaire un devis (dupliquer).
+    if (montantHonorairesHT !== undefined && !prev?.devis_id) {
+      fields.push('montantHonorairesHT = ?'); values.push(montantHonorairesHT);
+    }
     if (dateDebut !== undefined) { fields.push('dateDebut = ?'); values.push(dateDebut); }
     if (dateFin !== undefined) { fields.push('dateFin = ?'); values.push(dateFin); }
     if (client_id !== undefined) { fields.push('client_id = ?'); values.push(client_id); }
@@ -623,6 +618,13 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     if (dateSignatureClient !== undefined) { fields.push('dateSignatureClient = ?'); values.push(dateSignatureClient); }
     if (periodicite_facturation !== undefined) { fields.push('periodicite_facturation = ?'); values.push(periodicite_facturation || null); }
     if (date_premiere_facture !== undefined) { fields.push('date_premiere_facture = ?'); values.push(date_premiere_facture || null); }
+    if (jour_prelevement !== undefined) { fields.push('jour_prelevement = ?'); values.push(Number(jour_prelevement) || null); }
+    if (mode_reglement !== undefined)   { fields.push('mode_reglement = ?');   values.push(mode_reglement || 'prelevement'); }
+    if (mandat_edi !== undefined)       { fields.push('mandat_edi = ?');       values.push(mandat_edi ? 1 : 0); }
+    if (mandat_social !== undefined)    { fields.push('mandat_social = ?');    values.push(mandat_social ? 1 : 0); }
+    if (presentation_client !== undefined)     { fields.push('presentation_client = ?');     values.push(presentation_client || null); }
+    if (perimetre_mission !== undefined)       { fields.push('perimetre_mission = ?');       values.push(perimetre_mission || null); }
+    if (courrier_accompagnement !== undefined) { fields.push('courrier_accompagnement = ?'); values.push(courrier_accompagnement || null); }
 
     if (!fields.length) return res.status(400).json({ message: 'Aucun champ' });
     values.push(req.params.id);
@@ -655,6 +657,11 @@ router.put('/:id', verifyToken, requireRole('expert', 'chef_mission'), async (re
     let factureIds = [];
     let missionIds = [];
     if (statut === 'signee' && prev?.statut !== 'signee') {
+      // Chaîne post-signature (idempotente) — plan de facturation + mandat SEPA + notifs
+      const { executerChainePostSignature } = require('../utils/ldmSignatureChain');
+      await executerChainePostSignature(Number(req.params.id), req.user?.id)
+        .catch(e => console.error('[PUT ldm signee] chaîne:', e.message));
+
       const billingResult = await genererFacturesDepuisLDM(req.params.id).catch(e => {
         console.error('Auto-billing error:', e.message);
         return { factureIds: [], existed: false };
@@ -778,69 +785,11 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
       if (ldm.pdf_path) {
         pdfBuffer = await fs2.readFile(ldm.pdf_path);
       } else {
-        // Rebuild payload (same as generer-pdf route)
-        let missions = [];
-        if (ldm.devis_id) {
-          const [lignes] = await pool.query(
-            'SELECT * FROM lignes_devis WHERE devisId = ? AND actif = 1 ORDER BY ordre', [ldm.devis_id]
-          );
-          const aggr = {};
-          for (const l of lignes) {
-            const key = l.section || l.rubrique || 'Autre';
-            if (!aggr[key]) aggr[key] = { libelle: l.rubrique || key, type: key, total: 0 };
-            aggr[key].total += parseFloat(l.tarif_ht || l.totalHT || 0);
-          }
-          const ORDER = ['Comptabilité', 'Fiscalité', 'Social', 'Juridique', 'Conseil'];
-          missions = [...ORDER.filter(k => aggr[k]), ...Object.keys(aggr).filter(k => !ORDER.includes(k))]
-            .filter(k => aggr[k] && aggr[k].total > 0)
-            .map(k => ({ libelle: aggr[k].libelle, type: aggr[k].type, periodicite: 'Mensuel', montant_annuel_ht: Math.round(aggr[k].total * 100) / 100 }));
-        }
-        const [[cab]] = await pool.query('SELECT * FROM parametres_cabinet LIMIT 1').catch(() => [[{}]]);
-        const cabinet = cab || {};
-        const ht = parseFloat(ldm.montantHonorairesHT || ldm.montant_annuel_ht || 0);
-        const payload = {
-          numero: ldm.numero,
-          date_prise_effet: ldm.dateDebut ? new Date(ldm.dateDebut).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          honoraires_ht_annuel: ht,
-          honoraires_ht_brut: parseFloat(ldm.devis_ht_brut || ht),
-          remise_pct: parseFloat(ldm.devis_remise || 0),
-          duree_preavis: ldm.dureePreavis || 3,
-          modalites_paiement: 'Mensuellement par prélèvement automatique SEPA.',
-          missions,
-          client: {
-            raison_sociale: ldm.display_nom || '',
-            siren: '',
-            adresse: '',
-            cp_ville: '',
-            interlocuteur: '',
-            email: destinataire,
-          },
-          cabinet: {
-            nomCabinet: cabinet.nomCabinet || 'ParFi France',
-            adresse: cabinet.adresse || '5 Place Langrand',
-            codePostal: cabinet.codePostal || '54400',
-            ville: cabinet.ville || 'Longwy',
-            telephone: cabinet.telephone || '',
-            email: cabinet.email || 'thierry.alcaraz@parfi-france.fr',
-            siteWeb: cabinet.siteWeb || 'www.parfi-france.fr',
-          },
-          signataire: {
-            nom_complet: ldm.collab_prenom ? `${ldm.collab_prenom} ${ldm.collab_nom}`.trim() : 'ParFi France',
-            fonction: 'Expert-Comptable',
-            email: ldm.collab_email || cabinet.email || 'thierry.alcaraz@parfi-france.fr',
-          },
-        };
-        const SCRIPT = path2.join(__dirname, '..', 'python', 'generate_ldm_module.py');
-        pdfBuffer = await new Promise((resolve, reject) => {
-          const py = spawn('python3', [SCRIPT]);
-          const chunks = [], errChunks = [];
-          py.stdout.on('data', c => chunks.push(c));
-          py.stderr.on('data', c => errChunks.push(c));
-          py.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(Buffer.concat(errChunks).toString())));
-          py.on('error', err => reject(err));
-          py.stdin.write(JSON.stringify(payload));
-          py.stdin.end();
-        });
+        const { chargerContexteLdm, buildLdmPayload } = require('../utils/ldmPayload');
+        const ctx = await chargerContexteLdm(pool, ldm.id);
+        const payload = buildLdmPayload(ctx);
+        const { generateLdmPdf } = require('../utils/ldmGenerator');
+        pdfBuffer = await generateLdmPdf(payload);
         const PDF_DIR = path2.join(__dirname, '..', '..', 'uploads', 'ldm');
         await fs2.mkdir(PDF_DIR, { recursive: true });
         const filename = `${ldm.numero.replace(/[^a-zA-Z0-9-]/g, '_')}.pdf`;
@@ -861,18 +810,16 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
           let snap = null;
           try { snap = ldm.snapshot_client ? JSON.parse(ldm.snapshot_client) : null; } catch {}
 
-          // Récupérer les données client pour les mandats
-          const clientRow = ldm.client_id
-            ? (await pool.query('SELECT * FROM clients WHERE id = ?', [ldm.client_id]).then(([r]) => r[0])) || {}
-            : {};
-
           const signerInfo = {
             email:     destinataire,
             firstName: snap?.contactPrenom || (snap?.nom || nomClient).split(' ')[0],
             lastName:  snap?.contactNom || (snap?.nom || nomClient).split(' ').slice(1).join(' ') || '.',
           };
 
-          // 1 — Envoyer la LDM dans sa propre requête Yousign
+          // Envoi de la LDM seule via Yousign. Les mandats (prélèvement,
+          // impôts, URSSAF) ne sont plus rattachés à la LDM — ce sont des
+          // annexes d'onboarding, produites/signées via /api/mandats
+          // rattachées à l'onboarding du dossier (chantier G).
           const { requestId, signerId, signingUrl } = await yousign.createSignatureRequest({
             pdfBuffer,
             filename:    `${ldm.numero}.pdf`,
@@ -886,55 +833,13 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
             [requestId, signerId, signingUrl, ldm.id]
           );
 
-          // 2 — Envoyer chaque mandat dans sa propre requête Yousign (1 doc = 1 requête)
-          // req.body.mandats = tableau des types à inclure (ex: ['prelevement','urssaf'])
-          // undefined = tous les mandats (rétrocompat) ; [] = aucun mandat
-          const mandatsSelectionnes = Array.isArray(req.body.mandats)
-            ? req.body.mandats
-            : ['prelevement', 'impots', 'urssaf'];
-
-          let mandatsEnvoyes = 0;
-          try {
-            const allMandatDocs = await genererTousMandats({ client: clientRow, cabinet, ldm });
-            const mandatDocs = allMandatDocs.filter(md => mandatsSelectionnes.includes(md.type));
-            const LABELS = {
-              prelevement: 'Mandat de prélèvement SEPA',
-              impots:      'Procuration fiscale',
-              urssaf:      'Procuration sociale',
-            };
-            for (const md of mandatDocs) {
-              try {
-                const mdReq = await yousign.createSignatureRequest({
-                  pdfBuffer:   md.buffer,
-                  filename:    md.filename,
-                  requestName: `${LABELS[md.type] || md.libelle} — ${ldm.numero}`,
-                  signer:      signerInfo,
-                  expirationDays: 60,
-                });
-                // Créer le mandat si inexistant et stocker l'ID Yousign
-                await pool.query(
-                  `INSERT INTO mandats (ldm_id, type, libelle, signe, yousign_request_id, yousign_signer_id)
-                   VALUES (?, ?, ?, 0, ?, ?)
-                   ON DUPLICATE KEY UPDATE yousign_request_id = VALUES(yousign_request_id), yousign_signer_id = VALUES(yousign_signer_id)`,
-                  [ldm.id, md.type, md.libelle, mdReq.requestId, mdReq.signerId]
-                );
-                mandatsEnvoyes++;
-              } catch (mdErr) {
-                console.error(`[envoyer LDM] mandat ${md.type} Yousign erreur:`, mdErr.message);
-              }
-            }
-          } catch (mErr) {
-            console.error('[envoyer LDM] génération mandats erreur (non-bloquant):', mErr.message);
-          }
-
           return res.json({
-            message:    `LDM et ${mandatsEnvoyes} mandat(s) envoyés séparément pour signature électronique via Yousign à ${destinataire}`,
+            message:    `LDM envoyée pour signature électronique via Yousign à ${destinataire}`,
             statut:     'envoyee',
             email:      destinataire,
             yousign:    true,
             requestId,
             signingUrl,
-            mandats:    mandatsEnvoyes,
           });
         } catch (ysErr) {
           console.error('[envoyer LDM] Yousign erreur:', ysErr.message);
@@ -999,10 +904,24 @@ router.post('/:id/envoyer', verifyToken, requireRole('expert'), async (req, res)
 // ── POST /api/lettres-mission/:id/signer — signature + injection tâches ──────
 router.post('/:id/signer', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   try {
-    const { collaborateur_id, chef_mission_id } = req.body;
+    const { collaborateur_id, chef_mission_id, iban, bic } = req.body;
 
     if (!collaborateur_id) return res.status(400).json({ message: 'Le collaborateur est obligatoire' });
     if (!chef_mission_id) return res.status(400).json({ message: 'Le chef de mission / chef de groupe est obligatoire' });
+
+    // IBAN facultatif côté CRM : si fourni, on le valide. Si invalide, on renvoie
+    // une erreur pour éviter d'enregistrer un mandat "actif" avec un IBAN faux.
+    let cleanIban = null;
+    if (iban && String(iban).trim()) {
+      const { validerIban } = require('../utils/ldmSignatureChain');
+      cleanIban = String(iban).replace(/\s+/g, '').toUpperCase();
+      if (!validerIban(cleanIban)) {
+        return res.status(400).json({
+          code: 'IBAN_INVALIDE',
+          message: 'IBAN invalide (clé de contrôle incorrecte).',
+        });
+      }
+    }
 
     const [[ldm]] = await pool.query(
       `SELECT l.*, c.nom AS client_nom
@@ -1053,32 +972,17 @@ router.post('/:id/signer', verifyToken, requireRole('expert', 'chef_mission'), a
       ).catch(() => {});
     }
 
-    // Update pipeline: mark opportunity as won
-    if (ldm.client_id) {
-      await pool.query(
-        `UPDATE opportunites SET statut = 'gagne', probabilite = 100, updatedAt = NOW()
-         WHERE client_id = ? AND statut NOT IN ('gagne','perdu')`,
-        [ldm.client_id]
-      ).catch(() => {});
-    }
-    // Also via devis chain
-    if (ldm.devis_id) {
-      const [[devisRow]] = await pool.query('SELECT opportunite_id FROM devis WHERE id = ?', [ldm.devis_id]).catch(() => [[null]]);
-      if (devisRow?.opportunite_id) {
-        await pool.query(
-          `UPDATE opportunites SET statut = 'gagne', probabilite = 100, updatedAt = NOW() WHERE id = ?`,
-          [devisRow.opportunite_id]
-        ).catch(() => {});
-      }
-    }
+    // Pipeline : le passage à 'ldm_signee' est géré par ldmService.transitionner('activer')
+    // (activation automatique déclenchée par la signature). Ne pas écraser ici.
 
-    // Create plan_facturation entry
-    const montantMensuel = Math.round((ldm.montantHonorairesHT || 0) / 12 * 100) / 100;
-    await pool.query(
-      `INSERT INTO plan_facturation (lettreMissionId, client_id, frequence, montantHT, tauxTVA, dateDebut, statut)
-       VALUES (?, ?, 'mensuelle', ?, 20, CURDATE(), 'actif')`,
-      [req.params.id, ldm.client_id || null, montantMensuel]
-    ).catch((e) => { console.error('plan_facturation insert error:', e.message); });
+    // Chaîne d'automatisation post-signature : plan de facturation + mandat SEPA.
+    // Non-bloquante : toute erreur est loggée et notifiée, la signature reste acquise.
+    // Si IBAN saisi dans la modale : mandat directement 'actif'.
+    const { executerChainePostSignature } = require('../utils/ldmSignatureChain');
+    const rapportChaine = await executerChainePostSignature(
+      Number(req.params.id), req.user.id,
+      cleanIban ? { iban: cleanIban, bic: bic || null } : {}
+    ).catch(e => ({ ok: false, errors: [e.message], plan: {}, mandat: {} }));
 
     const tachesCreees = await injecterTachesLDM(req.params.id, collaborateur_id, chef_mission_id, req.user.id);
 
@@ -1094,23 +998,10 @@ router.post('/:id/signer', verifyToken, requireRole('expert', 'chef_mission'), a
     // Calcul et stockage du budget par profil (depuis dimensionnement)
     await stockerBudgetParProfil(Number(req.params.id), ldm.dimensionnement_id);
 
-    // ── Créer les mandats standard ────────────────────────────────────────────
-    const mandatTypes = [
-      { type: 'prelevement', libelle: 'Mandat de prélèvement bancaire' },
-      { type: 'impots',      libelle: 'Mandat fiscal (impôts)' },
-      { type: 'urssaf',      libelle: 'Mandat organismes sociaux (URSSAF)' },
-    ];
-    for (const m of mandatTypes) {
-      const [[exists]] = await pool.query(
-        `SELECT id FROM mandats WHERE ldm_id = ? AND type = ?`, [req.params.id, m.type]
-      ).catch(() => [[null]]);
-      if (!exists) {
-        await pool.query(
-          `INSERT INTO mandats (ldm_id, type, libelle, signe) VALUES (?,?,?,0)`,
-          [req.params.id, m.type, m.libelle]
-        ).catch(() => {});
-      }
-    }
+    // Les mandats (SEPA, impôts, URSSAF) ne sont plus créés à la signature LDM.
+    // Ce sont des annexes d'onboarding, matérialisées par les étapes E07/E10/E13
+    // du référentiel onboarding_etape_modele et produites via /api/mandats
+    // rattachées à l'onboarding du dossier (chantier G).
 
     // ── Notifications ─────────────────────────────────────────────────────────
     const [experts] = await pool.query(`SELECT id FROM utilisateurs WHERE role IN ('expert','chef_mission')`).catch(() => [[]]);
@@ -1667,138 +1558,26 @@ router.delete('/:id', verifyToken, requireRole('expert'), async (req, res) => {
 
 router.post('/:id/generer-pdf', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
   try {
-    const { spawn } = require('child_process');
     const path2 = require('path');
     const fs2   = require('fs/promises');
+    const { generateLdmPdf } = require('../utils/ldmGenerator');
+    const { chargerContexteLdm, buildLdmPayload } = require('../utils/ldmPayload');
+    const theme = (req.body && req.body.theme === 'ecran') ? 'ecran' : 'impression';
 
-    const [[ldm]] = await pool.query(
-      `SELECT l.*,
-              c.nom AS client_nom, c.siren AS client_siren,
-              c.adresse AS client_adresse, c.code_postal AS client_cp, c.ville AS client_ville,
-              COALESCE(c.email_dirigeant, c.portal_email) AS client_email,
-              c.forme_juridique AS client_forme,
-              p.nom AS prospect_nom, p.siren AS prospect_siren,
-              p.adresse AS prospect_adresse, p.code_postal AS prospect_cp, p.ville AS prospect_ville,
-              COALESCE(p.contact_email, p.email) AS prospect_email,
-              p.contact_prenom, p.contact_nom, p.forme_juridique AS prospect_forme,
-              COALESCE(c.nom, p.nom) AS display_nom,
-              COALESCE(c.siren, p.siren) AS display_siren,
-              u.prenom AS collab_prenom, u.nom AS collab_nom, u.email AS collab_email,
-              d.total_ht_net AS devis_ht_net, d.totalHT AS devis_ht_brut,
-              d.remise_pct AS devis_remise, d.notesInternes AS devis_notes,
-              d.notesClient AS devis_modalites
-       FROM lettres_mission l
-       LEFT JOIN clients c ON l.client_id = c.id
-       LEFT JOIN prospects p ON l.prospect_id = p.id
-       LEFT JOIN utilisateurs u ON l.collaborateur_id = u.id
-       LEFT JOIN devis d ON l.devis_id = d.id
-       WHERE l.id = ?`,
-      [req.params.id]
-    );
-    if (!ldm) return res.status(404).json({ message: 'LDM introuvable' });
+    const ctx = await chargerContexteLdm(pool, Number(req.params.id));
+    if (!ctx) return res.status(404).json({ message: 'LDM introuvable' });
 
-    // Get devis lines for missions
-    let missions = [];
-    if (ldm.devis_id) {
-      const [lignes] = await pool.query(
-        'SELECT * FROM lignes_devis WHERE devisId = ? AND actif = 1 ORDER BY ordre', [ldm.devis_id]
-      );
-      // Aggregate by section (same logic as devis PDF)
-      const aggr = {};
-      for (const l of lignes) {
-        const key = l.section || l.rubrique || 'Autre';
-        if (!aggr[key]) aggr[key] = { libelle: l.rubrique || key, type: key, total: 0 };
-        aggr[key].total += parseFloat(l.tarif_ht || l.totalHT || 0);
-      }
-      const ORDER = ['Comptabilité', 'Fiscalité', 'Social', 'Juridique', 'Conseil'];
-      missions = [...ORDER.filter(k => aggr[k]), ...Object.keys(aggr).filter(k => !ORDER.includes(k))]
-        .filter(k => aggr[k] && aggr[k].total > 0)
-        .map(k => ({
-          libelle:           aggr[k].libelle,
-          type:              aggr[k].type,
-          periodicite:       'Mensuel',
-          montant_annuel_ht: Math.round(aggr[k].total * 100) / 100,
-        }));
-    }
+    const payload = buildLdmPayload(ctx, { theme });
 
-    const [[cab]] = await pool.query('SELECT * FROM parametres_cabinet LIMIT 1').catch(() => [[{}]]);
-    const cabinet = cab || {};
-
-    const ht     = parseFloat(ldm.montantHonorairesHT || ldm.montant_annuel_ht || 0);
-    const htBrut = parseFloat(ldm.devis_ht_brut || ht);
-    const remise = parseFloat(ldm.devis_remise || 0);
-
-    const rawForme = ldm.client_id
-      ? (ldm.client_forme || '')
-      : (ldm.prospect_forme || '');
-
-    const payload = {
-      numero:               ldm.numero,
-      date_prise_effet:     ldm.dateDebut
-        ? new Date(ldm.dateDebut).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0],
-      honoraires_ht_annuel: ht,
-      honoraires_ht_brut:   htBrut,
-      remise_pct:           remise,
-      duree_preavis:        ldm.dureePreavis || 3,
-      modalites_paiement:   ldm.devis_modalites || 'Mensuellement par prélèvement automatique SEPA.',
-      objet_mission:        ldm.objetMission || '',
-      missions,
-      client: {
-        raison_sociale: ldm.display_nom || '',
-        forme:          rawForme,
-        siren:          ldm.display_siren || '',
-        adresse:        ldm.client_id ? (ldm.client_adresse || '') : (ldm.prospect_adresse || ''),
-        cp_ville:       ldm.client_id
-          ? [ldm.client_cp, ldm.client_ville].filter(Boolean).join(' ')
-          : [ldm.prospect_cp, ldm.prospect_ville].filter(Boolean).join(' '),
-        interlocuteur:  ldm.contact_prenom || ldm.contact_nom
-          ? `${ldm.contact_prenom || ''} ${ldm.contact_nom || ''}`.trim()
-          : '',
-        email:          ldm.client_email || ldm.prospect_email || '',
-      },
-      cabinet: {
-        nomCabinet:   cabinet.nomCabinet  || 'ParFi France',
-        siren:        cabinet.siren       || '',
-        numeroOrdre:  cabinet.numeroOrdre || '',
-        adresse:      cabinet.adresse     || '5 Place Langrand',
-        codePostal:   cabinet.codePostal  || '54400',
-        ville:        cabinet.ville       || 'Longwy',
-        telephone:    cabinet.telephone   || '',
-        email:        cabinet.email       || 'thierry.alcaraz@parfi-france.fr',
-        siteWeb:      cabinet.siteWeb     || 'www.parfi-france.fr',
-      },
-      signataire: {
-        nom_complet: ldm.collab_prenom
-          ? `${ldm.collab_prenom} ${ldm.collab_nom}`.trim()
-          : 'ParFi France',
-        fonction:    'Expert-Comptable',
-        email:       ldm.collab_email || cabinet.email || 'thierry.alcaraz@parfi-france.fr',
-      },
-    };
-
-    // Run Python generator
-    const pdfBuffer = await new Promise((resolve, reject) => {
-      const SCRIPT = path2.join(__dirname, '..', 'python', 'generate_ldm_module.py');
-      const py = spawn('python3', [SCRIPT]);
-      const chunks = [], errChunks = [];
-      py.stdout.on('data', c => chunks.push(c));
-      py.stderr.on('data', c => errChunks.push(c));
-      py.on('close', code => {
-        if (code === 0) resolve(Buffer.concat(chunks));
-        else reject(new Error(`Python LDM PDF: ${Buffer.concat(errChunks).toString()}`));
-      });
-      py.on('error', err => reject(new Error(`spawn: ${err.message}`)));
-      py.stdin.write(JSON.stringify(payload));
-      py.stdin.end();
-    });
+    // Run Python generator (v4 via run_pipeline dispatcher)
+    const pdfBuffer = await generateLdmPdf(payload);
 
     const PDF_DIR = path2.join(__dirname, '..', '..', 'uploads', 'ldm');
     await fs2.mkdir(PDF_DIR, { recursive: true });
-    const filename = `${ldm.numero.replace(/[^a-zA-Z0-9-]/g, '_')}.pdf`;
+    const filename = `${ctx.ldm.numero.replace(/[^a-zA-Z0-9-]/g, '_')}.pdf`;
     const filepath = path2.join(PDF_DIR, filename);
     await fs2.writeFile(filepath, pdfBuffer);
-    await pool.query('UPDATE lettres_mission SET pdf_path = ? WHERE id = ?', [filepath, ldm.id]);
+    await pool.query('UPDATE lettres_mission SET pdf_path = ? WHERE id = ?', [filepath, ctx.ldm.id]);
 
     res.json({ ok: true, filename, size: pdfBuffer.length });
   } catch (e) {
@@ -1827,6 +1606,241 @@ router.get('/:id/pdf', verifyToken, async (req, res) => {
     res.send(pdfBuffer);
   } catch (e) {
     res.status(500).json({ message: 'Erreur lecture PDF', error: e.message });
+  }
+});
+
+// ── POST /:id/draft-ai — rédaction assistée par IA des sections variables ─────
+// Génère (sans persister par défaut) 3 sections rédactionnelles pour une LDM en
+// brouillon : présentation client, périmètre de mission, courrier d'accompagnement.
+// N'écrit jamais dans les clauses normatives (bibliotheque_clauses / ldm_clauses_snapshot).
+router.post('/:id/draft-ai', verifyToken, requireRole('expert', 'chef_mission'), async (req, res) => {
+  const ldmId = Number(req.params.id);
+  if (!ldmId) return res.status(400).json({ message: 'ID LDM invalide' });
+
+  try {
+    // 1) Charger la LDM + garantir statut brouillon
+    const [[ldm]] = await pool.query(
+      `SELECT l.*, c.nom AS client_nom, c.raison_sociale, c.forme_juridique, c.siren, c.code_ape,
+              c.regime_fiscal, c.regime_tva, c.activite_type, c.nb_salaries, c.nb_etablissements,
+              c.ville, c.prenom_dirigeant, c.nom_dirigeant, c.convention_collective,
+              p.nom AS prospect_nom
+       FROM lettres_mission l
+       LEFT JOIN clients c ON l.client_id = c.id
+       LEFT JOIN prospects p ON l.prospect_id = p.id
+       WHERE l.id = ?`,
+      [ldmId]
+    );
+    if (!ldm) return res.status(404).json({ message: 'LDM introuvable' });
+    if (ldm.statut !== 'brouillon') {
+      return res.status(409).json({
+        message: 'Rédaction IA disponible uniquement en brouillon',
+        statut_actuel: ldm.statut,
+      });
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ message: 'Service IA indisponible (clé API non configurée)' });
+    }
+
+    // 2) Charger les rubriques du devis lié si présent
+    let lignesDevis = [];
+    if (ldm.devis_id) {
+      const [rows] = await pool.query(
+        `SELECT rubrique, section, libelle, description, intervenant, periodicite, tarif_ht
+         FROM lignes_devis WHERE devisId = ? AND actif = 1 ORDER BY ordre`,
+        [ldm.devis_id]
+      );
+      lignesDevis = rows;
+    }
+
+    // 3) Notes RDV / interactions client récentes (contexte optionnel)
+    let interactions = [];
+    if (ldm.client_id) {
+      const [rows] = await pool.query(
+        `SELECT date_interaction, type, sujet, resume
+         FROM interactions_log
+         WHERE client_id = ?
+         ORDER BY date_interaction DESC LIMIT 5`,
+        [ldm.client_id]
+      ).catch(() => [[]]);
+      interactions = rows || [];
+    }
+
+    // 4) Recueil du besoin déjà saisi (si présent)
+    let recueil = {};
+    try { recueil = ldm.recueil_besoin_json ? (typeof ldm.recueil_besoin_json === 'string' ? JSON.parse(ldm.recueil_besoin_json) : ldm.recueil_besoin_json) : {}; }
+    catch { recueil = {}; }
+
+    // 5) Assemblage contexte pour le prompt
+    const contexte = {
+      client: {
+        raison_sociale: ldm.raison_sociale || ldm.client_nom || ldm.prospect_nom || 'Client',
+        forme_juridique: ldm.forme_juridique || null,
+        siren: ldm.siren || null,
+        code_ape: ldm.code_ape || null,
+        activite_type: ldm.activite_type || null,
+        regime_fiscal: ldm.regime_fiscal || null,
+        regime_tva: ldm.regime_tva || null,
+        nb_salaries: ldm.nb_salaries || 0,
+        nb_etablissements: ldm.nb_etablissements || 1,
+        ville: ldm.ville || null,
+        dirigeant: [ldm.prenom_dirigeant, ldm.nom_dirigeant].filter(Boolean).join(' ') || null,
+        convention_collective: ldm.convention_collective || null,
+      },
+      mission: {
+        numero_ldm: ldm.numero,
+        type_mission: ldm.typeMission,
+        objet_mission: ldm.objetMission,
+        honoraires_ht_annuels: Number(ldm.montantHonorairesHT || 0),
+        periodicite_facturation: ldm.periodicite_facturation || null,
+        date_debut: ldm.dateDebut || null,
+      },
+      recueil_besoin: {
+        activite: recueil.activite || null,
+        enjeux: recueil.enjeux || null,
+        contraintes: recueil.contraintes || null,
+      },
+      rubriques: lignesDevis.map(l => ({
+        rubrique: l.rubrique, libelle: l.libelle || l.description,
+        periodicite: l.periodicite, intervenant: l.intervenant,
+        tarif_ht: Number(l.tarif_ht || 0),
+      })),
+      interactions_recentes: interactions.map(i => ({
+        date: i.date_interaction, type: i.type, sujet: i.sujet, resume: i.resume,
+      })),
+    };
+
+    // 6) Prompt système + user pour Claude
+    const systemPrompt = `Tu es un rédacteur senior au sein d'un cabinet d'expertise comptable français (Parfi, Longwy). Tu rédiges les parties personnalisées d'une lettre de mission destinée à un client professionnel.
+
+RÈGLES ABSOLUES :
+- Français professionnel, vouvoiement obligatoire, ton d'un cabinet EC (précis, sobre, engageant).
+- Adapte le ton au profil client (TPE, société, activité, secteur).
+- NE RÉDIGE JAMAIS les clauses normatives (responsabilité civile, secret professionnel, LAB-FT, médiation de la consommation, résiliation, RGPD, propriété intellectuelle, litiges) : elles sont insérées automatiquement depuis la bibliothèque de clauses du cabinet.
+- Concentre-toi UNIQUEMENT sur les 3 sections demandées ci-dessous.
+- Ne mentionne aucun montant d'honoraires numérique dans la présentation client ni le courrier (les honoraires sont dans un tableau dédié).
+- Pas de listes à puces markdown, pas de titres markdown : rédaction en paragraphes fluides.
+- Pas de placeholders type [XXX] ou {{variable}} : utilise directement les données fournies.
+
+FORMAT DE SORTIE : réponds UNIQUEMENT par un objet JSON valide, sans markdown, sans backticks, sans texte avant ou après. Structure exacte :
+{
+  "presentation_client": "Paragraphe de présentation du client et de son contexte d'activité (120-180 mots).",
+  "perimetre_mission": "Description sur mesure du périmètre de mission, s'appuyant sur les rubriques du chiffrage fournies. Regroupe par domaine (comptable, fiscal, social, juridique, conseil) selon les rubriques présentes. (200-350 mots)",
+  "courrier_accompagnement": "Courrier d'accompagnement adressé au dirigeant, chaleureux mais professionnel, qui présente la démarche du cabinet et invite à la signature. (150-250 mots)"
+}`;
+
+    const userPrompt = `Voici les données du dossier client. Rédige les 3 sections demandées.
+
+CLIENT :
+${JSON.stringify(contexte.client, null, 2)}
+
+MISSION :
+${JSON.stringify(contexte.mission, null, 2)}
+
+RECUEIL DU BESOIN (saisi par le collaborateur) :
+${JSON.stringify(contexte.recueil_besoin, null, 2)}
+
+RUBRIQUES DU CHIFFRAGE ACCEPTÉ (${contexte.rubriques.length} lignes) :
+${JSON.stringify(contexte.rubriques, null, 2)}
+
+INTERACTIONS RÉCENTES AVEC LE CLIENT :
+${contexte.interactions_recentes.length ? JSON.stringify(contexte.interactions_recentes, null, 2) : '(aucune)'}`;
+
+    // 7) Appel Claude API (HTTPS direct, cohérent avec calls.js/ged.js)
+    const https = require('https');
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+
+    const apiResponse = await new Promise((resolve, reject) => {
+      const req2 = https.request({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      }, (r) => {
+        let d = '';
+        r.on('data', c => d += c);
+        r.on('end', () => resolve({ status: r.statusCode, body: d }));
+      });
+      req2.on('error', reject);
+      req2.setTimeout(30000, () => { req2.destroy(new Error('timeout')); });
+      req2.write(body);
+      req2.end();
+    }).catch(e => ({ status: e.message === 'timeout' ? 504 : 502, body: '', error: e.message }));
+
+    if (apiResponse.status === 504) {
+      return res.status(504).json({ message: 'Délai dépassé lors de la génération IA (30s)' });
+    }
+    if (!apiResponse.status || apiResponse.status >= 400) {
+      let anthropicMsg = null;
+      try { anthropicMsg = JSON.parse(apiResponse.body || '{}').error?.message || null; } catch {}
+      return res.status(apiResponse.status || 502).json({
+        message: 'Erreur API IA',
+        detail: anthropicMsg || apiResponse.error || 'Réponse invalide',
+      });
+    }
+
+    // 8) Parse enveloppe Anthropic → JSON strict
+    let anthropic, text, draft;
+    try { anthropic = JSON.parse(apiResponse.body); }
+    catch { return res.status(502).json({ message: 'Réponse IA non-JSON (enveloppe)' }); }
+    text = anthropic?.content?.[0]?.text || '';
+    if (!text) return res.status(502).json({ message: 'Réponse IA vide' });
+    try { draft = JSON.parse(text); }
+    catch {
+      // Tentative d'extraction du premier bloc JSON si le modèle a bavardé
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) return res.status(502).json({ message: 'Réponse IA non-JSON (contenu)' });
+      try { draft = JSON.parse(m[0]); }
+      catch { return res.status(502).json({ message: 'Réponse IA non parsable' }); }
+    }
+
+    const clean = (v) => (typeof v === 'string' ? v.trim() : '');
+    const sections = {
+      presentation_client: clean(draft.presentation_client),
+      perimetre_mission: clean(draft.perimetre_mission),
+      courrier_accompagnement: clean(draft.courrier_accompagnement),
+    };
+    if (!sections.presentation_client && !sections.perimetre_mission && !sections.courrier_accompagnement) {
+      return res.status(502).json({ message: 'Aucune section rédigée par l\'IA' });
+    }
+
+    // 9) Audit trail (ne stocke pas le contenu — juste flags des sections générées)
+    await pool.query(
+      `INSERT INTO ldm_evenements (ldm_id, type, acteur_id, acteur_nom, statut_avant, statut_apres, commentaire, metadata)
+       VALUES (?, 'ia_draft', ?, ?, ?, ?, ?, ?)`,
+      [
+        ldmId,
+        req.user?.id || null,
+        `${req.user?.prenom || ''} ${req.user?.nom || ''}`.trim() || null,
+        'brouillon', 'brouillon',
+        'Rédaction assistée par IA (aperçu)',
+        JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          sections_generees: Object.keys(sections).filter(k => sections[k]),
+          usage: anthropic?.usage || null,
+        }),
+      ]
+    ).catch(e => console.error('[ldm_evenements ia_draft]', e.message));
+
+    res.json({
+      success: true,
+      draft: sections,
+      model: 'claude-sonnet-4-6',
+      usage: anthropic?.usage || null,
+    });
+  } catch (e) {
+    console.error('[POST /ldm/:id/draft-ai]', e);
+    res.status(500).json({ message: 'Erreur serveur rédaction IA', error: e.message });
   }
 });
 

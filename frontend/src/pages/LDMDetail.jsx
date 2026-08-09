@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { askPdfTheme } from '../components/ConfirmDialog';
+import BudgetLignesSection from '../components/BudgetLignesSection';
 
 const fmt = v => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0);
 
@@ -79,19 +81,14 @@ function NextStepCard({ title, subtitle, description, primary, secondaries = [],
   );
 }
 
-function printLDM(ldm, mandats) {
+// mandats retiré — annexes d'onboarding, plus dans le PDF LDM (chantier G).
+function printLDM(ldm, _mandats) {
   const nom     = ldm.client_nom || '—';
   const today   = new Date().toLocaleDateString('fr-FR');
   const debut   = ldm.dateDebut   ? new Date(ldm.dateDebut).toLocaleDateString('fr-FR')  : '—';
   const typeLbl = TYPES_MISSION[ldm.typeMission] || ldm.typeMission;
   const isSigned = ldm.statut === 'signee';
   const signDate = ldm.dateSignatureClient ? new Date(ldm.dateSignatureClient).toLocaleDateString('fr-FR') : '';
-
-  const mandatsHTML = mandats.length > 0 ? `
-    <div class="section-title">Mandats</div>
-    <table><thead><tr><th>Mandat</th><th class="center" style="width:120px">Signé</th><th class="right" style="width:130px">Date signature</th></tr></thead>
-    <tbody>${mandats.map(m => `<tr><td>${m.libelle || m.type}</td><td class="center">${m.signe ? '✓ Oui' : 'Non'}</td><td class="right">${m.date_signature ? new Date(m.date_signature).toLocaleDateString('fr-FR') : '—'}</td></tr>`).join('')}</tbody>
-    </table>` : '';
 
   const html = `<!DOCTYPE html>
 <html lang="fr"><head><meta charset="UTF-8"><title>Lettre de mission ${ldm.numero}</title>
@@ -169,7 +166,6 @@ tbody tr{border-bottom:1px solid #e5eaf0}tbody td{padding:9px 10px}
     </div>
   </div></div>
 
-  ${mandatsHTML}
 
   <div class="section-title">Conditions générales</div>
   <div class="clause">
@@ -202,8 +198,6 @@ tbody tr{border-bottom:1px solid #e5eaf0}tbody td{padding:9px 10px}
   w.document.close();
 }
 
-const MANDAT_ICONS = { prelevement: '🏦', impots: '🏛️', urssaf: '👷', autre: '📄' };
-const MANDAT_LABELS = { prelevement: 'Prélèvement bancaire', impots: 'Mandat fiscal (impôts)', urssaf: 'Organismes sociaux (URSSAF)', autre: 'Autre mandat' };
 
 const SECTION_COLORS_LDM = { Comptabilité: '#1d4ed8', Fiscalité: '#b45309', Social: '#15803d', Juridique: '#7c3aed' };
 
@@ -241,7 +235,6 @@ export default function LDMDetail() {
   const { user } = useAuth();
 
   const [ldm, setLdm] = useState(null);
-  const [mandats, setMandats] = useState([]);
   const [taches, setTaches] = useState([]);
   const [users, setUsers] = useState([]);
   const [rubriques, setRubriques] = useState([]);
@@ -259,28 +252,28 @@ export default function LDMDetail() {
   const [activerModal, setActiverModal] = useState(false);
   const [selectedCollab, setSelectedCollab] = useState('');
   const [selectedChef, setSelectedChef] = useState('');
+  const [signIban, setSignIban] = useState('');
   const [emailModal, setEmailModal] = useState(null);
   const [emailInput, setEmailInput] = useState('');
   const [resilierModal, setResilierModal] = useState(false);
   const [resilierForm, setResilierForm] = useState({ motif: '', dateResiliation: '' });
   const [annulerModal, setAnnulerModal] = useState(false);
   const [editMission, setEditMission] = useState(false);
-  const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '', periodicite_facturation: '', date_premiere_facture: '' });
+  const [missionForm, setMissionForm] = useState({ objetMission: '', montantHonorairesHT: '', dateDebut: '', periodicite_facturation: '', date_premiere_facture: '', jour_prelevement: 5, mode_reglement: 'prelevement' });
   const [envoyerModal, setEnvoyerModal] = useState(false);
-  const [envoyerConfig, setEnvoyerConfig] = useState({ mandats: ['prelevement', 'impots', 'urssaf'], date_premiere_facture: '', periodicite_facturation: '' });
+  const [envoyerConfig, setEnvoyerConfig] = useState({ date_premiere_facture: '', periodicite_facturation: '' });
   const [savingMission, setSavingMission] = useState(false);
+  const [iaForm, setIaForm] = useState({ presentation_client: '', perimetre_mission: '', courrier_accompagnement: '' });
+  const [generatingIa, setGeneratingIa] = useState(false);
+  const [savingIa, setSavingIa] = useState(false);
 
   const isExpert = user?.role === 'expert';
   const canPrepare = ['expert', 'chef_mission'].includes(user?.role);
 
   const load = async () => {
     try {
-      const [{ data: l }, { data: m }] = await Promise.all([
-        api.get(`/lettres-mission/${id}`),
-        api.get(`/lettres-mission/${id}/mandats`).catch(() => ({ data: [] })),
-      ]);
+      const { data: l } = await api.get(`/lettres-mission/${id}`);
       setLdm(l);
-      setMandats(m);
       // Initialise recueil form from stored JSON
       if (l.recueil_besoin_json) {
         try {
@@ -288,6 +281,11 @@ export default function LDMDetail() {
           if (r) setRecueilForm({ activite: r.activite || '', effectif: r.effectif || '', enjeux: r.enjeux || '', contraintes: r.contraintes || '' });
         } catch {}
       }
+      setIaForm({
+        presentation_client: l.presentation_client || '',
+        perimetre_mission: l.perimetre_mission || '',
+        courrier_accompagnement: l.courrier_accompagnement || '',
+      });
       if (l.collaborateur_id && !selectedCollab) setSelectedCollab(String(l.collaborateur_id));
       else if (l.intervenantId && !selectedCollab) setSelectedCollab(String(l.intervenantId));
       if (l.chef_mission_id && !selectedChef) setSelectedChef(String(l.chef_mission_id));
@@ -322,9 +320,11 @@ export default function LDMDetail() {
   }, [ldm?.id]);
 
   const genererPdf = async () => {
+    const { ok, theme } = await askPdfTheme({ title: 'Générer le PDF de la LDM', defaultCanal: 'download' });
+    if (!ok) return;
     setGeneratingPdf(true); setMsg(null);
     try {
-      await api.post(`/lettres-mission/${id}/generer-pdf`);
+      await api.post(`/lettres-mission/${id}/generer-pdf`, { theme });
       setPdfReady(true);
       setMsg({ type: 'ok', text: '✓ PDF OEC généré' });
     } catch (e) {
@@ -343,10 +343,7 @@ export default function LDMDetail() {
   });
 
   const ouvrirEnvoyerModal = () => {
-    // Pré-cocher uniquement les mandats pas encore signés
-    const dejaSignes = new Set(mandats.filter(m => m.signe).map(m => m.type));
     setEnvoyerConfig({
-      mandats: ['prelevement', 'impots', 'urssaf'].filter(t => !dejaSignes.has(t)),
       date_premiere_facture: ldm.date_premiere_facture ? ldm.date_premiere_facture.split('T')[0] : '',
       periodicite_facturation: ldm.periodicite_facturation || '',
     });
@@ -362,24 +359,23 @@ export default function LDMDetail() {
         setLdm(d => ({ ...d, ...payload }));
       }
       setEnvoyerModal(false);
-      envoyerLDM(null, envoyerConfig.mandats);
+      envoyerLDM(null);
     } catch (e) {
       setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur lors de l\'enregistrement' });
     }
   };
 
-  const envoyerLDM = async (emailOverride, mandatsSel) => {
+  const envoyerLDM = async (emailOverride) => {
     setSigning(true); setMsg(null);
     try {
       const body = {};
       if (emailOverride) body.emailOverride = emailOverride;
-      if (mandatsSel !== undefined) body.mandats = mandatsSel;
       const { data } = await api.post(`/lettres-mission/${id}/envoyer`, body);
       if (data.missingEmail) {
         setSigning(false);
         const email = await askEmail(data.nomContact);
         if (!email) return;
-        return envoyerLDM(email, mandatsSel);
+        return envoyerLDM(email);
       }
       if (data.emailError) {
         setMsg({ type: 'warn', text: `Statut mis à jour, mais l'email n'a pas pu être envoyé : ${data.emailError}` });
@@ -403,6 +399,8 @@ export default function LDMDetail() {
         collaborateur_id: Number(selectedCollab),
         chef_mission_id:  Number(selectedChef),
       };
+      const cleanIban = (signIban || '').replace(/\s+/g, '').toUpperCase();
+      if (cleanIban) payload.iban = cleanIban;
       const { data: result } = await api.post(`/lettres-mission/${id}/signer`, payload);
       const collabName = users.find(u => String(u.id) === String(selectedCollab));
       const chefName   = users.find(u => String(u.id) === String(selectedChef));
@@ -523,6 +521,8 @@ export default function LDMDetail() {
       dateDebut: ldm.dateDebut ? ldm.dateDebut.slice(0, 10) : '',
       periodicite_facturation: ldm.periodicite_facturation || '',
       date_premiere_facture: ldm.date_premiere_facture ? ldm.date_premiere_facture.slice(0, 10) : '',
+      jour_prelevement: ldm.jour_prelevement || 5,
+      mode_reglement:   ldm.mode_reglement   || 'prelevement',
     });
     setEditMission(true);
   };
@@ -536,6 +536,8 @@ export default function LDMDetail() {
         dateDebut: missionForm.dateDebut || null,
         periodicite_facturation: missionForm.periodicite_facturation || null,
         date_premiere_facture: missionForm.date_premiere_facture || null,
+        jour_prelevement: Number(missionForm.jour_prelevement) || 5,
+        mode_reglement:   missionForm.mode_reglement || 'prelevement',
       });
       setEditMission(false);
       setMsg({ type: 'ok', text: '✓ Mission mise à jour' });
@@ -543,6 +545,59 @@ export default function LDMDetail() {
     } catch (e) {
       setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur mise à jour mission' });
     } finally { setSavingMission(false); }
+  };
+
+  const generateIaDraft = async () => {
+    setGeneratingIa(true); setMsg(null);
+    try {
+      const { data } = await api.post(`/lettres-mission/${id}/draft-ai`);
+      const draft = data?.draft || {};
+      const SECTIONS = [
+        { key: 'presentation_client',     label: 'Présentation client' },
+        { key: 'perimetre_mission',       label: 'Périmètre de mission' },
+        { key: 'courrier_accompagnement', label: 'Courrier d\'accompagnement' },
+      ];
+      const next = { ...iaForm };
+      let replaced = 0, inserted = 0, skipped = 0;
+      for (const s of SECTIONS) {
+        const generated = (draft[s.key] || '').trim();
+        if (!generated) continue;
+        const current = (next[s.key] || '').trim();
+        if (current) {
+          const ok = window.confirm(`Remplacer le texte actuel de « ${s.label} » par la version IA ?`);
+          if (!ok) { skipped++; continue; }
+          replaced++;
+        } else {
+          inserted++;
+        }
+        next[s.key] = generated;
+      }
+      setIaForm(next);
+      const parts = [];
+      if (inserted) parts.push(`${inserted} inséré${inserted > 1 ? 's' : ''}`);
+      if (replaced) parts.push(`${replaced} remplacé${replaced > 1 ? 's' : ''}`);
+      if (skipped)  parts.push(`${skipped} conservé${skipped > 1 ? 's' : ''}`);
+      setMsg({ type: 'ok', text: `✨ Rédaction IA — ${parts.join(', ') || 'aucun changement'}. Vérifiez puis enregistrez.` });
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      const msg = e.response?.data?.message || 'Erreur génération IA';
+      setMsg({ type: 'err', text: detail ? `${msg} — ${detail}` : msg });
+    } finally { setGeneratingIa(false); }
+  };
+
+  const saveIaSections = async () => {
+    setSavingIa(true); setMsg(null);
+    try {
+      await api.put(`/lettres-mission/${id}`, {
+        presentation_client: iaForm.presentation_client || null,
+        perimetre_mission: iaForm.perimetre_mission || null,
+        courrier_accompagnement: iaForm.courrier_accompagnement || null,
+      });
+      setMsg({ type: 'ok', text: '✓ Sections rédactionnelles enregistrées' });
+      await load();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur sauvegarde' });
+    } finally { setSavingIa(false); }
   };
 
   const saveRecueilBesoin = async () => {
@@ -556,16 +611,6 @@ export default function LDMDetail() {
     } catch (e) {
       setMsg({ type: 'err', text: e.response?.data?.message || 'Erreur sauvegarde' });
     } finally { setSavingRecueil(false); }
-  };
-
-  const toggleMandat = async (m) => {
-    try {
-      await api.put(`/lettres-mission/${id}/mandats/${m.id}`, {
-        signe: !m.signe,
-        date_signature: !m.signe ? new Date().toISOString().slice(0, 10) : null,
-      });
-      setMandats(prev => prev.map(x => x.id === m.id ? { ...x, signe: !m.signe, date_signature: !m.signe ? new Date().toISOString().slice(0, 10) : null } : x));
-    } catch { setMsg({ type: 'err', text: 'Erreur mandat' }); }
   };
 
   if (loading) return <div className="spinner"><div className="spinner-ring" /></div>;
@@ -734,6 +779,11 @@ export default function LDMDetail() {
             subtitle="Mission active"
             title="LDM active — mission en cours"
             description="Les tâches ont été planifiées et les brouillons de factures générés automatiquement à la signature."
+            primary={ldm.dossier_id ? {
+              label: '📋 Voir l\'onboarding',
+              onClick: () => navigate(`/onboarding/${ldm.dossier_id}`),
+              color: '#0369a1',
+            } : undefined}
             secondaries={[
               ...(isExpert ? [{ label: 'Résilier', onClick: () => setResilierModal(true), color: '#dc2626' }] : []),
             ]}
@@ -895,6 +945,9 @@ export default function LDMDetail() {
               </div>
             )}
 
+            {/* Budget par mission (chantier F) */}
+            <BudgetLignesSection ldm={ldm} missions={missionsDetail} />
+
             {/* Rubriques issues du devis */}
             {rubriques.length > 0 && (
               <div className="card">
@@ -931,11 +984,16 @@ export default function LDMDetail() {
                 {editMission ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      {/* Rubriques + montant = source unique de vérité = devis figé.
+                          Modifier ici créerait une divergence involontaire. Pour
+                          changer le prix, il faut refaire un devis (dupliquer). */}
                       <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label" style={{ fontSize: 12 }}>Honoraires HT annuels (€)</label>
-                        <input type="number" className="form-control" min="0" step="100"
-                          value={missionForm.montantHonorairesHT}
-                          onChange={e => setMissionForm(f => ({ ...f, montantHonorairesHT: e.target.value }))} />
+                        <label className="form-label" style={{ fontSize: 12 }}>
+                          Honoraires HT annuels (€) · <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>figé depuis le devis</span>
+                        </label>
+                        <div className="form-control" style={{ background: 'var(--bg-muted, #f6f8fb)', color: 'var(--text-muted)', cursor: 'not-allowed' }}>
+                          {fmt(missionForm.montantHonorairesHT || 0)}
+                        </div>
                       </div>
                       <div className="form-group" style={{ margin: 0 }}>
                         <label className="form-label" style={{ fontSize: 12 }}>Date de début</label>
@@ -970,6 +1028,31 @@ export default function LDMDetail() {
                         value={missionForm.objetMission}
                         onChange={e => setMissionForm(f => ({ ...f, objetMission: e.target.value }))}
                         placeholder="Décrivez l'objet de la mission…" />
+                    </div>
+
+                    {/* Section : Plan de facturation */}
+                    <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 14, marginTop: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                        Plan de facturation
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontSize: 12 }}>Jour de prélèvement</label>
+                          <input type="number" min="1" max="28" className="form-control"
+                            value={missionForm.jour_prelevement}
+                            onChange={e => setMissionForm(f => ({ ...f, jour_prelevement: e.target.value }))} />
+                        </div>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontSize: 12 }}>Mode de règlement</label>
+                          <select className="form-control"
+                            value={missionForm.mode_reglement}
+                            onChange={e => setMissionForm(f => ({ ...f, mode_reglement: e.target.value }))}>
+                            <option value="prelevement">Prélèvement SEPA</option>
+                            <option value="virement">Virement</option>
+                            <option value="cheque">Chèque</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => setEditMission(false)}>Annuler</button>
@@ -1030,47 +1113,119 @@ export default function LDMDetail() {
               </div>
             </div>
 
-            {/* Mandats */}
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Mandats</span>
-                {mandats.length > 0 && (
-                  <span style={{ fontSize: 12, color: mandats.filter(m => m.signe).length === mandats.length ? '#00897b' : 'var(--text-muted)' }}>
-                    {mandats.filter(m => m.signe).length}/{mandats.length} signés
+            {/* Rédaction personnalisée (assistée par IA) — brouillon uniquement */}
+            {ldm.statut === 'brouillon' && canPrepare && (
+              <div className="card">
+                <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span className="card-title">Rédaction personnalisée</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                    Sections variables — les clauses normatives ne sont pas modifiées
                   </span>
-                )}
-              </div>
-              {mandats.length === 0 ? (
-                <div className="empty-state" style={{ padding: 24 }}>
-                  <p style={{ fontSize: 13 }}>Les mandats seront créés automatiquement à la signature de la LDM</p>
-                </div>
-              ) : (
-                <div className="card-body" style={{ paddingTop: 10, paddingBottom: 10 }}>
-                  {mandats.map(m => (
-                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                      <span style={{ fontSize: 20 }}>{MANDAT_ICONS[m.type] || '📄'}</span>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{m.libelle || MANDAT_LABELS[m.type]}</div>
-                        {m.date_signature && (
-                          <div style={{ fontSize: 11, color: '#00897b' }}>
-                            Signé le {new Date(m.date_signature).toLocaleDateString('fr-FR')}
-                          </div>
-                        )}
-                      </div>
-                      {canPrepare && (
-                        <button
-                          className={`btn btn-sm ${m.signe ? 'btn-ghost' : 'btn-primary'}`}
-                          onClick={() => toggleMandat(m)}
-                          style={{ fontSize: 12, padding: '4px 12px', background: m.signe ? '' : '#00897b', borderColor: m.signe ? '' : '#00897b' }}
-                        >
-                          {m.signe ? '✓ Signé' : 'Marquer signé'}
-                        </button>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <button
+                      className="btn btn-sm"
+                      onClick={generateIaDraft}
+                      disabled={generatingIa || savingIa}
+                      title="Rédiger les 3 sections à partir des données client, du chiffrage et des notes"
+                      style={{
+                        background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)',
+                        display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12,
+                      }}
+                    >
+                      {generatingIa ? (
+                        <><span className="spinner-ring" style={{ width: 12, height: 12, borderWidth: 2 }} /> Rédaction en cours…</>
+                      ) : (
+                        <>✨ Rédiger avec l'IA</>
                       )}
-                    </div>
-                  ))}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={saveIaSections}
+                      disabled={savingIa || generatingIa}
+                      style={{ fontSize: 12 }}
+                    >
+                      {savingIa ? 'Sauvegarde…' : '💾 Enregistrer'}
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {generatingIa && (
+                    <div style={{
+                      fontSize: 12, color: 'var(--accent-hover)',
+                      background: 'var(--accent-light)', border: '1px solid var(--accent)',
+                      borderRadius: 6, padding: '8px 12px',
+                    }}>
+                      Génération en cours — l'IA analyse le dossier client et rédige les 3 sections (~15-30s).
+                    </div>
+                  )}
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontSize: 12 }}>Présentation du client</label>
+                    <textarea
+                      className="form-control"
+                      rows={5}
+                      style={{ resize: 'vertical', fontSize: 13, lineHeight: 1.5 }}
+                      value={iaForm.presentation_client}
+                      onChange={e => setIaForm(f => ({ ...f, presentation_client: e.target.value }))}
+                      placeholder="Paragraphe de présentation du client et de son contexte d'activité — rédigez ou cliquez sur « Rédiger avec l'IA »."
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontSize: 12 }}>Périmètre de mission</label>
+                    <textarea
+                      className="form-control"
+                      rows={7}
+                      style={{ resize: 'vertical', fontSize: 13, lineHeight: 1.5 }}
+                      value={iaForm.perimetre_mission}
+                      onChange={e => setIaForm(f => ({ ...f, perimetre_mission: e.target.value }))}
+                      placeholder="Description sur mesure du périmètre de mission, s'appuyant sur les rubriques du chiffrage."
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontSize: 12 }}>Courrier d'accompagnement</label>
+                    <textarea
+                      className="form-control"
+                      rows={5}
+                      style={{ resize: 'vertical', fontSize: 13, lineHeight: 1.5 }}
+                      value={iaForm.courrier_accompagnement}
+                      onChange={e => setIaForm(f => ({ ...f, courrier_accompagnement: e.target.value }))}
+                      placeholder="Courrier adressé au dirigeant présentant la démarche du cabinet."
+                    />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Chaque section reste éditable après génération. Validation humaine obligatoire avant envoi.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Aperçu lecture seule (statuts avancés) */}
+            {ldm.statut !== 'brouillon' && (ldm.presentation_client || ldm.perimetre_mission || ldm.courrier_accompagnement) && (
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">Rédaction personnalisée</span>
+                </div>
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {ldm.presentation_client && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Présentation du client</div>
+                      <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', fontSize: 13, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ldm.presentation_client}</div>
+                    </div>
+                  )}
+                  {ldm.perimetre_mission && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Périmètre de mission</div>
+                      <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', fontSize: 13, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ldm.perimetre_mission}</div>
+                    </div>
+                  )}
+                  {ldm.courrier_accompagnement && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Courrier d'accompagnement</div>
+                      <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', fontSize: 13, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ldm.courrier_accompagnement}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Tâches injectées */}
             {taches.length > 0 && (
@@ -1273,7 +1428,7 @@ export default function LDMDetail() {
                   <li>Affectation du dossier <strong>{ldm.client_nom}</strong> au collaborateur choisi</li>
                   <li>Planification des tâches dans son planning</li>
                   <li>Génération des brouillons de factures</li>
-                  <li>Création des mandats (prélèvement, impôts, URSSAF)</li>
+                  <li>Ouverture de l'onboarding client (dont mandats en annexes)</li>
                 </ul>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -1330,7 +1485,7 @@ export default function LDMDetail() {
                   <li>Le dossier <strong>{ldm.client_nom}</strong> sera affecté au collaborateur sélectionné</li>
                   <li>Les tâches de la mission seront planifiées dans son planning{ldm.dateDebut ? ` à partir du ${new Date(ldm.dateDebut).toLocaleDateString('fr-FR')}` : ''}</li>
                   <li>Les tâches périodiques (mensuelles, trimestrielles…) génèrent une occurrence par échéance sur 12 mois</li>
-                  <li>Les mandats seront créés</li>
+                  <li>L'onboarding du client sera ouvert (mandats en annexes)</li>
                   <li>Les brouillons de factures seront générés automatiquement</li>
                 </ul>
               </div>
@@ -1418,6 +1573,26 @@ export default function LDMDetail() {
               {(!selectedCollab || !selectedChef) && (
                 <div style={{ fontSize: 12, color: '#d97706', marginTop: 10 }}>
                   ⚠ Le collaborateur et le chef de mission sont tous les deux obligatoires.
+                </div>
+              )}
+
+              {/* IBAN facultatif — si renseigné, le mandat SEPA est créé actif. */}
+              {(ldm.mode_reglement === 'prelevement' || /prél/i.test(ldm.modaliteFacturation || '')) && (
+                <div className="form-group" style={{ marginTop: 16, marginBottom: 0 }}>
+                  <label className="form-label">
+                    IBAN du client (facultatif)
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
+                      renseigné = mandat SEPA actif ; vide = mandat en attente RIB
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={signIban}
+                    onChange={e => setSignIban(e.target.value.toUpperCase())}
+                    placeholder="FR76 3000 4000 0100 0000 0000 A00"
+                    style={{ fontFamily: 'monospace', letterSpacing: '0.5px' }}
+                  />
                 </div>
               )}
 
@@ -1531,45 +1706,8 @@ export default function LDMDetail() {
             </div>
             <div className="modal-body">
 
-              {/* Mandats */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, color: 'var(--text)' }}>
-                  Mandats à envoyer pour signature
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-                  Décochez les mandats déjà signés ou non nécessaires pour cette mission.
-                </div>
-                {[
-                  { type: 'prelevement', label: 'Mandat de prélèvement SEPA' },
-                  { type: 'impots',      label: 'Procuration fiscale (impôts)' },
-                  { type: 'urssaf',      label: 'Procuration sociale (URSSAF)' },
-                ].map(({ type, label }) => {
-                  const mandat = mandats.find(m => m.type === type);
-                  const checked = envoyerConfig.mandats.includes(type);
-                  return (
-                    <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', background: checked ? '#f0f9ff' : '#f9fafb', border: `1px solid ${checked ? '#bae6fd' : 'var(--border)'}`, marginBottom: 6 }}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => setEnvoyerConfig(c => ({
-                          ...c,
-                          mandats: checked ? c.mandats.filter(t => t !== type) : [...c.mandats, type],
-                        }))}
-                      />
-                      <span style={{ flex: 1, fontSize: 13 }}>{label}</span>
-                      {mandat?.signe ? (
-                        <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>✓ déjà signé</span>
-                      ) : mandat?.yousign_request_id ? (
-                        <span style={{ fontSize: 11, color: '#d97706' }}>en attente</span>
-                      ) : null}
-                    </label>
-                  );
-                })}
-                {envoyerConfig.mandats.length === 0 && (
-                  <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic', marginTop: 6 }}>
-                    Aucun mandat ne sera envoyé avec cette LDM.
-                  </div>
-                )}
+              <div style={{ marginBottom: 16, padding: 10, background: '#eff6ff', borderRadius: 6, fontSize: 12, color: '#1e40af' }}>
+                Les mandats (SEPA, impôts, URSSAF) sont désormais gérés dans l'onboarding du dossier — ils ne sont plus envoyés avec la LDM.
               </div>
 
               {/* Date première facture si manquante */}
@@ -1617,7 +1755,7 @@ export default function LDMDetail() {
                   }
                   style={{ background: '#2563eb' }}
                 >
-                  {signing ? 'Envoi…' : `📤 Envoyer${envoyerConfig.mandats.length > 0 ? ` + ${envoyerConfig.mandats.length} mandat(s)` : ''}`}
+                  {signing ? 'Envoi…' : '📤 Envoyer la LDM'}
                 </button>
               </div>
             </div>

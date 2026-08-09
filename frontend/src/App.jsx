@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MicroPortalAuthProvider, useMicroPortalAuth } from './context/MicroPortalAuthContext';
+import { PortalAuthProvider, usePortalAuth } from './context/PortalAuthContext';
 import Sidebar from './components/Sidebar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -30,6 +31,9 @@ import MorningBriefing from './pages/MorningBriefing';
 import GED from './pages/GED';
 import PortalLogin from './pages/PortalLogin';
 import PortalDashboard from './pages/PortalDashboard';
+import PortalFactures from './pages/PortalFactures';
+import PortalDocuments from './pages/PortalDocuments';
+import PortalSignLDM from './pages/PortalSignLDM';
 import Wiki from './pages/Wiki';
 import Automations from './pages/Automations';
 import TiimeImport from './pages/TiimeImport';
@@ -40,6 +44,7 @@ import Cabinet from './pages/Cabinet';
 import MonPortefeuille from './pages/MonPortefeuille';
 import DevisDetail from './pages/DevisDetail';
 import LDMDetail from './pages/LDMDetail';
+import Onboarding from './pages/Onboarding';
 import Appels from './pages/Appels';
 import ProspectsPipeline from './pages/ProspectsPipeline';
 import FeuilleDeTTemps from './pages/FeuilleDeTTemps';
@@ -78,6 +83,13 @@ function ProtectedMicroPortalRoute({ children }) {
   return children;
 }
 
+function ProtectedPortalRoute({ children }) {
+  const { portalUser, loading } = usePortalAuth();
+  if (loading) return <div className="spinner"><div className="spinner-ring" /></div>;
+  if (!portalUser) return <Navigate to="/portail" replace />;
+  return children;
+}
+
 function AppLayout({ children }) {
   return (
     <div className="app-shell">
@@ -95,7 +107,10 @@ function AppRoutes() {
 
       {/* Portail client (routes séparées, sans sidebar) */}
       <Route path="/portail" element={<PortalLogin />} />
-      <Route path="/portail/dashboard" element={<PortalDashboard />} />
+      <Route path="/portail/dashboard" element={<ProtectedPortalRoute><PortalDashboard /></ProtectedPortalRoute>} />
+      <Route path="/portail/factures"  element={<ProtectedPortalRoute><PortalFactures /></ProtectedPortalRoute>} />
+      <Route path="/portail/documents" element={<ProtectedPortalRoute><PortalDocuments /></ProtectedPortalRoute>} />
+      <Route path="/portail/signer/ldm/:id" element={<ProtectedPortalRoute><PortalSignLDM /></ProtectedPortalRoute>} />
 
       {/* CRM principal */}
       <Route path="/dashboard" element={<Navigate to="/ma-journee" replace />} />
@@ -144,6 +159,7 @@ function AppRoutes() {
       <Route path="/lettrage" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Lettrage /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LettresMission /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LDMDetail /></AppLayout></ProtectedRoute>} />
+      <Route path="/onboarding/:dossierId" element={<ProtectedRoute><AppLayout><Onboarding /></AppLayout></ProtectedRoute>} />
       <Route path="/prospects-pipeline" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ProspectsPipeline /></AppLayout></ProtectedRoute>} />
       <Route path="/prospects" element={<Navigate to="/prospects-pipeline?tab=prospects" replace />} />
       <Route path="/pipeline"  element={<Navigate to="/prospects-pipeline?tab=pipeline"  replace />} />
@@ -171,7 +187,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <MicroPortalAuthProvider>
-          <AppRoutes />
+          <PortalAuthProvider>
+            <AppRoutes />
+          </PortalAuthProvider>
         </MicroPortalAuthProvider>
       </AuthProvider>
     </BrowserRouter>

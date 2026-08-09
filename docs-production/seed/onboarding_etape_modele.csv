@@ -1,0 +1,31 @@
+code,phase,ordre,delai_jours,libelle,responsable,bloquant,condition
+P1,prealable,1,-10,Lettre déontologique de reprise adressée au confrère précédent,expert_comptable,true,reprise_confrere
+P2,prealable,2,-10,"Identification du client et du bénéficiaire effectif, cotation LAB",expert_comptable,true,
+P3,prealable,3,-5,Décision d'acceptation formalisée et datée,expert_comptable,true,
+E01,declenchement,4,0,"Dossier créé, affecté à un pôle et à un collaborateur",chef_de_mission,true,
+E02,declenchement,5,0,"Cotation initiale, classe A d'office la première année",chef_de_mission,true,
+E03,declenchement,6,0,Budget d'onboarding identifié distinctement du budget courant,chef_de_mission,false,
+E04,reprise,7,2,"Réponse du confrère obtenue, ou délai de réponse expiré",expert_comptable,false,reprise_confrere
+E05,reprise,8,2,"Justification du paiement des honoraires du prédécesseur, ou réserves écrites au client et saisine du CRO",expert_comptable,true,reprise_confrere
+E06,reprise,9,2,Dossier et FEC du prédécesseur demandés,collaborateur,false,reprise_confrere
+E07,collecte,10,5,Liste des pièces et pochette de mandats envoyées au client,collaborateur,true,
+E08,collecte,11,5,Rendez-vous de démarrage planifié,collaborateur,false,
+E09,demarrage,12,10,Rendez-vous de démarrage tenu,chef_de_mission,true,
+E10,demarrage,13,10,Mandat de désignation de plateforme agréée signé,collaborateur,true,
+E11,demarrage,14,10,Autorisation d'agrégation bancaire active,collaborateur,true,
+E12,demarrage,15,10,Procuration fiscale en place,collaborateur,true,
+E13,demarrage,16,10,Mandat SEPA signé,collaborateur,false,
+E14,demarrage,17,10,Information RGPD remise au client,collaborateur,true,
+E15,collecte,18,15,Pièces juridiques et d'identité réunies,collaborateur,false,
+E16,collecte,19,15,Liasses et comptes annuels des deux derniers exercices obtenus,collaborateur,false,
+E17,reprise,20,15,Balance de reprise et FEC obtenus,collaborateur,true,
+E18,reprise,21,15,Détail des comptes de tiers obtenu poste par poste,collaborateur,true,
+E19,parametrage,22,20,Balance d'ouverture intégrée et rapprochée,collaborateur,true,
+E20,parametrage,23,20,Réserves sur la balance d'ouverture notifiées par écrit au client,chef_de_mission,true,
+E21,parametrage,24,20,Connexions bancaires actives sur l'ensemble des comptes,collaborateur,true,
+E22,parametrage,25,20,Plan comptable adapté et règles d'affectation initialisées,collaborateur,false,
+E23,parametrage,26,20,Justificatif de conformité du logiciel de caisse obtenu,collaborateur,true,profil_especes
+E24,production,27,30,Premier arrêté périodique produit,collaborateur,true,
+E25,production,28,30,"Revue systématique par le chef de mission, quelle que soit la classe",chef_de_mission,true,
+E26,cloture,29,60,Point de fin d'onboarding tenu,expert_comptable,true,
+E27,cloture,30,60,"Décision écrite : clôture, prolongation ou avenant",expert_comptable,true,

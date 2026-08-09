@@ -67,6 +67,7 @@ describe('GET /api/portefeuille — structure et calcul', () => {
           id: 10, nom: 'Dupont SARL', siren: '123456789', type: 'client', regime: 'is',
           role_sur_dossier: 'responsable',
           ldm_id: 1, ldm_numero: 'LM-2026-001', ldm_statut: 'active', ldm_montant: '3600',
+          ca_facture_annee: '3600', // stats.caAnnuel dérive de ce champ depuis la refonte portefeuille
           ldm_date_debut: '2026-01-01',
           nb_taches: '5', nb_retard: '1', nb_en_cours: '2', nb_a_faire: '3',
           prochaine_echeance: '2026-05-10',
