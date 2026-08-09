@@ -1,0 +1,55 @@
+code,famille_cle,famille_libelle,libelle,regime_defaut,exige_dossier,saisie_groupee,exclu_ratio_productivite,donnee_sensible,actif
+C01,comptabilite,Comptabilité,Saisie et tenue comptable,courante,true,false,false,false,true
+C02,comptabilite,Comptabilité,Cadrages et travaux bilan,courante,true,false,false,false,true
+C03,comptabilite,Comptabilité,Révision des comptes,courante,true,false,false,false,true
+C04,comptabilite,Comptabilité,Supervision dossier,courante,true,false,false,false,true
+C05,comptabilite,Comptabilité,Situation intermédiaire,exceptionnelle,true,false,false,false,true
+C06,comptabilite,Comptabilité,"Paramétrage, mise en place comptabilité",exceptionnelle,true,false,false,false,true
+C07,comptabilite,Comptabilité,Autres travaux comptables,courante,true,false,false,false,true
+C08,comptabilite,Comptabilité,"Présentation, restitution bilan",courante,true,false,false,false,true
+F01,fiscal,Fiscal,Déclaration TVA,courante,true,false,false,false,true
+F02,fiscal,Fiscal,Solde et acomptes d'IS,courante,true,false,false,false,true
+F03,fiscal,Fiscal,Déclaration des honoraires DAS2,courante,true,false,false,false,true
+F04,fiscal,Fiscal,Autres déclarations et taxes,courante,true,false,false,false,true
+F05,fiscal,Fiscal,A COMPLETER,courante,true,false,false,false,true
+F06,fiscal,Fiscal,"Fiscal - Études, recherche",courante,true,false,false,false,true
+F07,fiscal,Fiscal,Assistance à contrôle fiscal,exceptionnelle,true,false,false,false,true
+F08,fiscal,Fiscal,Établissement IRPP et IFI,courante,true,false,false,false,true
+F09,fiscal,Fiscal,Autres travaux fiscalité personnelle,courante,true,false,false,false,true
+F10,fiscal,Fiscal,Autres travaux fiscalité professionnelle,courante,true,false,false,false,true
+G01,suivi_client,Suivi Client,Onboarding et formation client,courante,true,false,false,false,true
+G02,suivi_client,Suivi Client,Relance et alertes,courante,true,true,false,false,true
+G03,suivi_client,Suivi Client,Déplacement client,courante,true,false,false,false,true
+G04,suivi_client,Suivi Client,Facturation et gestion commerciale,courante,true,false,false,false,true
+G05,suivi_client,Suivi Client,Arrêt de travaux et fin de mission,courante,true,false,false,false,true
+G06,suivi_client,Suivi Client,Contact Téléphone/Mail,courante,true,true,false,false,true
+G07,suivi_client,Suivi Client,Autres gestion client,courante,true,false,false,false,true
+I01,interne,Interne cabinet,Absence personnelle,non_facturable,false,false,true,false,true
+I02,interne,Interne cabinet,Absence maladie,non_facturable,false,false,true,true,true
+I03,interne,Interne cabinet,Congé payé,non_facturable,false,false,true,false,true
+I04,interne,Interne cabinet,"RTT, récupération, repos compensateur",non_facturable,false,false,true,false,true
+I05,interne,Interne cabinet,Formation,non_facturable,false,false,false,false,true
+I06,interne,Interne cabinet,Réunion interne,non_facturable,false,false,false,false,true
+I07,interne,Interne cabinet,Autres interne cabinet,non_facturable,false,false,false,false,true
+J01,juridique,Juridique,"Création, immatriculation d'entreprise",exceptionnelle,true,false,false,false,true
+J02,juridique,Juridique,"Cessation, dissolution, liquidation, radiation",exceptionnelle,true,false,false,false,true
+J03,juridique,Juridique,Juridique annuel,courante,true,false,false,false,true
+J04,juridique,Juridique,Juridique exceptionnel,exceptionnelle,true,false,false,false,true
+J05,juridique,Juridique,Secrétariat juridique courant,courante,true,false,false,false,true
+J06,juridique,Juridique,Entretien juridique client,courante,true,false,false,false,true
+J07,juridique,Juridique,Autres travaux juridiques,courante,true,false,false,false,true
+K01,conseil,Conseil,Entretien conseil client,courante,true,false,false,false,true
+K02,conseil,Conseil,Prévisionnel d'activité,exceptionnelle,true,false,false,false,true
+K03,conseil,Conseil,Tableaux de bord et rapports,courante,true,false,false,false,true
+K04,conseil,Conseil,Évaluation d'entreprise,exceptionnelle,true,false,false,false,true
+K05,conseil,Conseil,Conseil montage patrimonial et fiscal,exceptionnelle,true,false,false,false,true
+K06,conseil,Conseil,Autres travaux de conseil client,courante,true,false,false,false,true
+S01,social,Social,Fiche de paie,courante,true,false,false,false,true
+S02,social,Social,A COMPLETER,courante,true,false,false,false,true
+S03,social,Social,"Gestion des arrêts, accidents, maternité",courante,true,false,false,false,true
+S04,social,Social,"Entrée salarié (contrat, DPAE)",courante,true,false,false,false,true
+S05,social,Social,"Sortie salarié (STC, radiation)",courante,true,false,false,false,true
+S06,social,Social,"Rupture conventionnelle, licenciement, avenant",courante,true,false,false,false,true
+S07,social,Social,"Entretien, étude, conseil social client",courante,true,false,false,false,true
+S08,social,Social,"Paramétrage, mise en place dossier social",exceptionnelle,true,false,false,false,true
+S09,social,Social,"Autres, divers social",courante,true,false,false,false,true

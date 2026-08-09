@@ -1,0 +1,6 @@
+grade,libelle,role_applicatif,taux_horaire_cible_eur,complexite_correspondante,valide_le
+junior,Collaborateur junior,collaborateur,45,faible,2026-08-09
+medior,Collaborateur medior,collaborateur,55,moyenne,2026-08-09
+senior,Collaborateur senior,collaborateur,70,elevee,2026-08-09
+chef_mission,Chef de mission,chef_de_mission,100,,2026-08-09
+expert_comptable,Expert-comptable,expert_comptable,160,,2026-08-09

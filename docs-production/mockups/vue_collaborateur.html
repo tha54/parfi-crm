@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ma semaine — vue collaborateur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#16202E; --ink-70:#48576B; --ink-45:#7B8899;
+  --paper:#EEF1F5; --surface:#FFFFFF;
+  --rule:#C9D2DD; --rule-soft:#E4E9EF;
+  --c0:#3F7A6B; --c1:#B8873A; --c2:#C2542E; --c3:#8B2635;
+  --display:'Bricolage Grotesque',system-ui,sans-serif;
+  --body:'IBM Plex Sans',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono)}
+
+/* ---------- chrome ---------- */
+.app{max-width:1240px;margin:0 auto;padding:22px}
+.topbar{
+  display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end;justify-content:space-between;
+  padding-bottom:16px;border-bottom:1px solid var(--rule);margin-bottom:20px;
+}
+.who .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-45)}
+.who h1{font-family:var(--display);font-weight:700;font-size:30px;letter-spacing:-.02em;margin-top:3px}
+.who .date{font-family:var(--mono);font-size:12px;color:var(--ink-45);margin-top:2px}
+.kpis{display:flex;gap:26px}
+.kpi{text-align:right}
+.kpi b{font-family:var(--mono);font-weight:600;font-size:26px;letter-spacing:-.02em;display:block;line-height:1;font-variant-numeric:tabular-nums}
+.kpi span{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-45)}
+.kpi.warn b{color:var(--c2)}
+
+.grid{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}
+
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:3px}
+.panel-h{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 16px;border-bottom:1px solid var(--rule-soft);background:#F7F9FB;
+}
+.panel-h h2{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-70);font-weight:500}
+.panel-h .hint{font-family:var(--mono);font-size:10px;color:var(--ink-45)}
+
+/* ---------- file des périodes ---------- */
+.row{
+  display:block;width:100%;text-align:left;background:transparent;border:0;
+  border-bottom:1px solid var(--rule-soft);padding:12px 16px;cursor:pointer;
+  transition:background .12s;position:relative;font-family:inherit;
+}
+.row:hover{background:#F5F8FB}
+.row[aria-current="true"]{background:#EFF4F9}
+.row[aria-current="true"]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ink)}
+.row:focus-visible{outline:2px solid var(--c2);outline-offset:-2px}
+.row-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.row-name{font-weight:600;font-size:14.5px;letter-spacing:-.005em}
+.row-ech{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.row-bot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;gap:10px}
+.row-meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-45)}
+.pips{display:flex;gap:2px;align-items:center}
+.pip{width:5px;height:5px;border-radius:50%;background:var(--rule)}
+.pip.f{background:var(--c0)}
+.pip.n{background:var(--rule)}
+.pip.a{background:var(--c2)}
+.late{color:var(--c2);font-weight:600}
+.soon{color:var(--c1)}
+.ok{color:var(--ink-45)}
+
+/* ---------- alertes liste ---------- */
+.alert-row{padding:11px 16px;border-bottom:1px solid var(--rule-soft);display:flex;gap:11px;align-items:flex-start}
+.gbadge{
+  font-family:var(--mono);font-size:9.5px;font-weight:600;color:#fff;
+  width:19px;height:19px;border-radius:2px;display:grid;place-items:center;flex:0 0 auto;margin-top:1px;
+}
+.alert-body{flex:1;min-width:0}
+.alert-t{font-size:13.5px;line-height:1.35}
+.alert-t b{font-weight:600}
+.alert-m{font-family:var(--mono);font-size:10.5px;color:var(--ink-45);margin-top:3px}
+.mini{
+  font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--rule);background:#fff;color:var(--ink-70);
+  padding:4px 8px;border-radius:2px;cursor:pointer;white-space:nowrap;
+}
+.mini:hover{border-color:var(--ink);color:var(--ink)}
+.mini:focus-visible{outline:2px solid var(--c2);outline-offset:1px}
+
+/* ---------- détail ---------- */
+.det-h{padding:18px 20px;border-bottom:1px solid var(--rule-soft)}
+.det-h .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-45)}
+.det-h h2{font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:-.02em;margin:4px 0 2px}
+.det-tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.tag{font-family:var(--mono);font-size:10px;letter-spacing:.06em;padding:3px 7px;border:1px solid var(--rule);border-radius:2px;color:var(--ink-70)}
+.tag.cls{border-color:var(--c1);color:var(--c1)}
+
+.banner{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:13px 20px;background:#FBF0EC;border-bottom:1px solid #EBD3CA;
+}
+.banner .gbadge{background:var(--c3)}
+.banner p{font-size:13.5px;color:#6E3225;line-height:1.45}
+.banner b{font-weight:600}
+
+/* progression */
+.prog{padding:16px 20px;border-bottom:1px solid var(--rule-soft);display:flex;gap:18px;align-items:center}
+.prog-bar{flex:1;height:6px;background:var(--rule-soft);border-radius:1px;overflow:hidden;display:flex}
+.prog-bar i{display:block;height:100%;transition:width .25s}
+.prog-txt{font-family:var(--mono);font-size:11.5px;color:var(--ink-45);white-space:nowrap}
+.prog-txt b{color:var(--ink);font-weight:600}
+
+/* blocs de tâches */
+.blocs{padding:6px 0 0}
+.bloc-h{
+  font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-45);
+  padding:14px 20px 6px;
+}
+.task{
+  display:grid;grid-template-columns:44px 1fr 118px;gap:12px;align-items:center;
+  padding:8px 20px;border-bottom:1px solid #F0F3F7;
+}
+.task:hover{background:#FAFCFD}
+.task-code{font-family:var(--mono);font-size:11px;color:var(--ink-45);font-weight:500}
+.task-lib{font-size:13.5px;line-height:1.35}
+.task-sub{font-family:var(--mono);font-size:10px;color:var(--ink-45);margin-top:2px}
+.task.done .task-lib{color:var(--ink-45)}
+.task.na .task-lib{color:var(--ink-45);font-style:italic}
+.task.blocking .task-lib{font-weight:600}
+
+.st{
+  font-family:var(--mono);font-size:10px;letter-spacing:.07em;
+  border:1px solid var(--rule);background:#fff;border-radius:2px;
+  padding:4px 0;width:100%;cursor:pointer;text-align:center;color:var(--ink-70);
+  transition:.13s;
+}
+.st:hover{border-color:var(--ink)}
+.st:focus-visible{outline:2px solid var(--c2);outline-offset:1px}
+.st[data-s="F"]{background:var(--c0);border-color:var(--c0);color:#fff}
+.st[data-s="EC"]{background:var(--c1);border-color:var(--c1);color:#fff}
+.st[data-s="NA"]{background:#EDF1F5;border-color:var(--rule);color:var(--ink-45)}
+.st[data-s="N"]{background:#fff;border-color:var(--rule);color:var(--ink-45)}
+.req{color:var(--c2);font-family:var(--mono);font-size:10px;margin-left:5px}
+
+/* pied d'action */
+.foot{padding:18px 20px;border-top:1px solid var(--rule);background:#F7F9FB;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.cta{
+  font-family:var(--body);font-weight:600;font-size:14px;
+  padding:11px 22px;border-radius:2px;border:1px solid var(--ink);
+  background:var(--ink);color:#fff;cursor:pointer;transition:.15s;
+}
+.cta[disabled]{background:#DDE3EA;border-color:var(--rule);color:var(--ink-45);cursor:not-allowed}
+.cta:not([disabled]):hover{background:#0D1620}
+.cta:focus-visible{outline:2px solid var(--c2);outline-offset:2px}
+.why{font-size:13px;color:var(--ink-70);flex:1;min-width:220px}
+.why b{color:var(--c2);font-weight:600}
+.why.green b{color:var(--c0)}
+
+/* modal */
+.veil{position:fixed;inset:0;background:rgba(22,32,46,.45);display:none;place-items:center;padding:20px;z-index:50}
+.veil.on{display:grid}
+.modal{background:#fff;border-radius:3px;max-width:520px;width:100%;border:1px solid var(--rule)}
+.modal-h{padding:18px 22px 0}
+.modal-h .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-45)}
+.modal-h h3{font-family:var(--display);font-weight:600;font-size:20px;margin-top:5px;letter-spacing:-.01em}
+.modal-b{padding:16px 22px 20px}
+.modal-b label{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-45);display:block;margin-bottom:6px}
+textarea{
+  width:100%;min-height:88px;padding:11px;font-family:var(--body);font-size:14px;
+  border:1px solid var(--rule);border-radius:2px;resize:vertical;color:var(--ink);
+}
+textarea:focus{outline:2px solid var(--ink);outline-offset:-1px;border-color:var(--ink)}
+.count{font-family:var(--mono);font-size:10.5px;color:var(--ink-45);margin-top:6px;display:flex;justify-content:space-between}
+.err{color:var(--c2);font-size:13px;margin-top:10px;display:none;line-height:1.4}
+.err.on{display:block}
+.modal-f{padding:0 22px 20px;display:flex;gap:10px;justify-content:flex-end}
+.ghost{background:#fff;border:1px solid var(--rule);color:var(--ink-70);padding:11px 18px;border-radius:2px;cursor:pointer;font-family:var(--body);font-size:14px}
+.ghost:hover{border-color:var(--ink);color:var(--ink)}
+
+.note{padding:14px 20px;font-size:12.5px;color:var(--ink-45);font-style:italic;line-height:1.5;border-top:1px solid var(--rule-soft)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="who">
+      <p class="eyebrow">Production &amp; supervision</p>
+      <h1>Ma semaine</h1>
+      <p class="date">Théo · jeudi 6 août 2026 · pôle Valérie</p>
+    </div>
+    <div class="kpis">
+      <div class="kpi warn"><b>1</b><span>en retard</span></div>
+      <div class="kpi"><b>3</b><span>mes alertes</span></div>
+      <div class="kpi"><b>7</b><span>suspens ouverts</span></div>
+      <div class="kpi"><b>4h10</b><span>temps non imputé</span></div>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- ============ COLONNE GAUCHE ============ -->
+    <div>
+      <div class="panel" style="margin-bottom:20px">
+        <div class="panel-h">
+          <h2>Mes périodes</h2>
+          <span class="hint">tri par échéance</span>
+        </div>
+        <div id="file"></div>
+        <p class="note">La liste est triée par échéance, pas par dossier. L'ordre de travail est donné, il n'est pas à décider.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">
+          <h2>Mes alertes</h2>
+          <span class="hint">cran 0</span>
+        </div>
+        <div id="alertes"></div>
+        <p class="note">Au-delà de 30 jours, ces alertes changeront de propriétaire automatiquement. Aucune action de votre part n'est nécessaire pour cela.</p>
+      </div>
+    </div>
+
+    <!-- ============ DÉTAIL ============ -->
+    <div class="panel" id="detail"></div>
+
+  </div>
+</div>
+
+<!-- modal clôture d'alerte -->
+<div class="veil" id="veil" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+  <div class="modal">
+    <div class="modal-h">
+      <p class="k" id="mref">Alerte E07 · Menuiserie Kraft</p>
+      <h3 id="mtitle">Clôturer l'alerte</h3>
+    </div>
+    <div class="modal-b">
+      <label for="motif">Motif de clôture</label>
+      <textarea id="motif" placeholder="Ce que vous écrivez ici doit rester compréhensible par un tiers dans trois ans."></textarea>
+      <div class="count"><span id="cnt">0 caractère</span><span>minimum 20</span></div>
+      <p class="err" id="err"></p>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" id="cancel">Annuler</button>
+      <button class="cta" id="save">Clôturer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var C={f:'#3F7A6B',ec:'#B8873A',na:'#DDE3EA',n:'#E4E9EF',g1:'#8B2635',g2:'#C2542E',g3:'#B8873A'};
+
+/* ---------- données ---------- */
+var TACHES=[
+ ['A','A1','Traitement des points en suspens de la période précédente',1],
+ ['A','A2','Prise de connaissance des alertes automatiques',1],
+ ['B','B1','Contrôle de la connexion bancaire',1],
+ ['B','B2','Contrôle de l\u2019intégration des pièces d\u2019achat et de vente',1],
+ ['B','B3','Contrôle des flux de facturation électronique',0],
+ ['B','B4','Contrôle de l\u2019intégration des écritures de paie',1],
+ ['B','B5','Traitement des documents non comptabilisables',0],
+ ['C','C1','Traitement des transactions bancaires non affectées',1],
+ ['C','C2','Contrôle des règles d\u2019affectation automatique',1],
+ ['C','C3','Rapprochement des factures et des règlements',1],
+ ['C','C4','Concordance du solde bancaire',1],
+ ['D','D1','Lettrage des comptes clients et fournisseurs',1],
+ ['D','D2','Lettrage des comptes 42 et 43',1],
+ ['D','D3','Lettrage des comptes 467',0],
+ ['D','D4','Apurement du compte 471',1],
+ ['D','D5','Apurement du compte 580',1],
+ ['D','D6','Justification du cycle programmé de la période',1],
+ ['E','E1','Établissement et contrôle de la déclaration de TVA',1],
+ ['E','E2','Écriture de TVA et concordance',1],
+ ['E','E3','Télétransmission et conservation de l\u2019accusé',1],
+ ['E','E4','Autres obligations de la période',0],
+ ['F','F1','Traitement et clôture des alertes de la période',1],
+ ['F','F2','Envoi de la liste des points en suspens au client',1],
+ ['F','F3','Identification des besoins et préoccupations du client',0],
+ ['F','F4','Saisie des temps de la période',1],
+ ['F','F5','Signalement des travaux hors lettre de mission',0]
+];
+var BLOCS={A:'Bloc A · ouverture de la période',B:'Bloc B · exhaustivité de la matière',C:'Bloc C · traitement des exceptions',D:'Bloc D · justification et lettrage',E:'Bloc E · obligations déclaratives',F:'Bloc F · restitution et travaux internes'};
+
+function etats(spec){var o={};TACHES.forEach(function(t){o[t[1]]=spec[t[1]]||'N';});return o;}
+
+var DOSSIERS=[
+ {id:'sapori',nom:"Sapori d'Italia",periode:'Juin 2026',ech:'20/07',retard:17,classe:'A',profils:'T + E + P',regime:'CA3 mensuelle',
+  bloquante:true,
+  etats:etats({A1:'F',A2:'F',B1:'F',B2:'F',B3:'NA',B4:'F',B5:'F',C1:'F',C2:'F',C3:'F',C4:'F',D1:'F',D2:'F',D3:'EC',D4:'N',D5:'F',D6:'N',E1:'F',E2:'F',E3:'F',E4:'NA',F1:'N',F2:'F',F3:'N',F4:'EC',F5:'F'}),
+  na:{B3:'Dossier non encore concerné par l\u2019obligation d\u2019émission',E4:'Aucune autre échéance sur la période'},
+  banner:{g:1,txt:'<b>Alerte D01 · solde de caisse créditeur</b> — 47 jours d\u2019ancienneté, cran 2. Cette alerte ne vous appartient plus : elle est suivie par Valérie, qui doit adresser un écrit formel au client.'}},
+
+ {id:'sci',nom:'SCI du Parc',periode:'2e trimestre 2026',ech:'10/08',retard:-4,classe:'C',profils:'T + H',regime:'CA3 trimestrielle',
+  etats:etats({A1:'F',A2:'F',B1:'F',B2:'F',B3:'NA',B4:'NA',B5:'F',C1:'F',C2:'EC',C3:'F',C4:'F',D1:'F',D2:'NA',D3:'F',D4:'F',D5:'F',D6:'N',E1:'EC',E2:'N',E3:'N',E4:'NA',F1:'F',F2:'N',F3:'N',F4:'EC',F5:'F'}),
+  na:{B3:'Non concerné',B4:'Aucun salarié',D2:'Aucun compte de personnel',E4:'Néant'},
+  banner:{g:2,txt:'<b>Alerte E01 · compte courant d\u2019associé débiteur</b> — 6 jours. Vérifier la qualité du titulaire avant toute écriture de régularisation.'}},
+
+ {id:'kraft',nom:'Menuiserie Kraft',periode:'Juillet 2026',ech:'20/08',retard:-14,classe:'B',profils:'T + N + P',regime:'CA3 mensuelle',
+  etats:etats({A1:'F',A2:'F',B1:'F',B2:'EC',B3:'NA',B4:'N',B5:'N',C1:'EC',C2:'N',C3:'N',C4:'N',D1:'N',D2:'N',D3:'N',D4:'N',D5:'N',D6:'N',E1:'N',E2:'N',E3:'N',E4:'N',F1:'N',F2:'N',F3:'N',F4:'EC',F5:'N'}),
+  na:{B3:'Non concerné'}},
+
+ {id:'pharma',nom:'Pharmacie Saint-Michel',periode:'Juillet 2026',ech:'20/08',retard:-14,classe:'B',profils:'T + E + P',regime:'CA3 mensuelle',
+  etats:etats({A1:'F',A2:'F',B1:'N',B2:'N',B3:'NA',B4:'N',B5:'N',C1:'N',C2:'N',C3:'N',C4:'N',D1:'N',D2:'N',D3:'N',D4:'N',D5:'N',D6:'N',E1:'N',E2:'N',E3:'N',E4:'N',F1:'N',F2:'N',F3:'N',F4:'N',F5:'N'}),
+  na:{B3:'Non concerné'}},
+
+ {id:'vernet',nom:'Garage Vernet',periode:'Juillet 2026',ech:'20/08',retard:-14,classe:'B',profils:'T + N + P',regime:'CA3 mensuelle',
+  etats:etats({A1:'F',A2:'N',B1:'N',B2:'N',B3:'NA',B4:'N',B5:'N',C1:'N',C2:'N',C3:'N',C4:'N',D1:'N',D2:'N',D3:'N',D4:'N',D5:'N',D6:'N',E1:'N',E2:'N',E3:'N',E4:'N',F1:'N',F2:'N',F3:'N',F4:'N',F5:'N'}),
+  na:{B3:'Non concerné'}},
+
+ {id:'marceau',nom:'Boulangerie Marceau',periode:'Juillet 2026',ech:'20/08',retard:-14,classe:'B',profils:'T + E + P',regime:'CA3 mensuelle',
+  etats:etats({A1:'N',A2:'N',B1:'N',B2:'N',B3:'NA',B4:'N',B5:'N',C1:'N',C2:'N',C3:'N',C4:'N',D1:'N',D2:'N',D3:'N',D4:'N',D5:'N',D6:'N',E1:'N',E2:'N',E3:'N',E4:'N',F1:'N',F2:'N',F3:'N',F4:'N',F5:'N'}),
+  na:{B3:'Non concerné'}},
+
+ {id:'berthaud',nom:'Holding Berthaud',periode:'Exercice 2025',ech:'30/09',retard:-55,classe:'C',profils:'T + H',regime:'Annuel',
+  etats:etats({A1:'F',A2:'F',B1:'F',B2:'F',B3:'NA',B4:'NA',B5:'F',C1:'F',C2:'F',C3:'F',C4:'F',D1:'F',D2:'NA',D3:'F',D4:'F',D5:'F',D6:'EC',E1:'NA',E2:'NA',E3:'NA',E4:'N',F1:'F',F2:'N',F3:'N',F4:'F',F5:'F'}),
+  na:{B3:'Non concerné',B4:'Aucun salarié',D2:'Aucun compte de personnel',E1:'Hors champ TVA',E2:'Hors champ TVA',E3:'Hors champ TVA'}}
+];
+
+var ALERTES=[
+ {id:'a1',ref:'E07',dossier:'Menuiserie Kraft',lib:'Solde du compte 471 non nul en fin de période — 2 340 €',j:8,g:2},
+ {id:'a2',ref:'G07',dossier:'Garage Vernet',lib:'Écritures enregistrées plus de 45 jours après l\u2019opération — 14 écritures',j:12,g:2},
+ {id:'a3',ref:'F05',dossier:'Boulangerie Marceau',lib:'Crédit de TVA reporté depuis 3 périodes sans demande de remboursement',j:21,g:3}
+];
+
+var sel='sapori';
+var closed={};
+
+/* ---------- rendu file ---------- */
+function pips(d){
+  var order=['A','B','C','D','E','F'],h='';
+  TACHES.forEach(function(t){
+    var s=d.etats[t[1]];
+    var cl = (s==='F'||s==='NA')?'f':(s==='EC'?'a':'n');
+    h+='<span class="pip '+cl+'"></span>';
+  });
+  return h;
+}
+function count(d){
+  var done=0,tot=0;
+  TACHES.forEach(function(t){tot++;var s=d.etats[t[1]];if(s==='F'||s==='NA')done++;});
+  return {done:done,tot:tot};
+}
+function renderFile(){
+  var h='';
+  DOSSIERS.forEach(function(d){
+    var c=count(d);
+    var ech = d.retard>0
+      ? '<span class="late">échue depuis '+d.retard+' j</span>'
+      : (d.retard>-7 ? '<span class="soon">dans '+(-d.retard)+' j</span>' : '<span class="ok">dans '+(-d.retard)+' j</span>');
+    h+='<button class="row" data-id="'+d.id+'" aria-current="'+(d.id===sel)+'">'
+      +'<div class="row-top"><span class="row-name">'+d.nom+'</span><span class="row-ech">'+ech+'</span></div>'
+      +'<div class="row-bot"><span class="row-meta">'+d.periode+' · classe '+d.classe+' · '+c.done+'/'+c.tot+'</span>'
+      +'<span class="pips">'+pips(d)+'</span></div></button>';
+  });
+  document.getElementById('file').innerHTML=h;
+  [].forEach.call(document.querySelectorAll('.row'),function(b){
+    b.addEventListener('click',function(){sel=b.getAttribute('data-id');renderFile();renderDetail();});
+  });
+}
+
+/* ---------- rendu alertes ---------- */
+function renderAlertes(){
+  var h='';
+  ALERTES.forEach(function(a){
+    if(closed[a.id])return;
+    var col = a.g===1?C.g1:(a.g===2?C.g2:C.g3);
+    h+='<div class="alert-row">'
+      +'<span class="gbadge" style="background:'+col+'">'+a.g+'</span>'
+      +'<div class="alert-body"><p class="alert-t"><b>'+a.ref+'</b> · '+a.dossier+'<br>'+a.lib+'</p>'
+      +'<p class="alert-m">'+a.j+' jours · cran 0 · propriétaire : moi</p></div>'
+      +'<button class="mini" data-a="'+a.id+'">Clôturer</button></div>';
+  });
+  if(!h) h='<p class="note" style="border:0">Aucune alerte ouverte à votre nom.</p>';
+  document.getElementById('alertes').innerHTML=h;
+  [].forEach.call(document.querySelectorAll('.mini'),function(b){
+    b.addEventListener('click',function(){openModal(b.getAttribute('data-a'));});
+  });
+}
+
+/* ---------- rendu détail ---------- */
+function renderDetail(){
+  var d=DOSSIERS.filter(function(x){return x.id===sel;})[0];
+  var c=count(d);
+  var blocking=[];
+  TACHES.forEach(function(t){
+    if(t[3]===1){var s=d.etats[t[1]];if(s!=='F'&&s!=='NA')blocking.push(t[1]);}
+  });
+
+  var segF=0,segEC=0,segNA=0;
+  TACHES.forEach(function(t){var s=d.etats[t[1]];if(s==='F')segF++;else if(s==='EC')segEC++;else if(s==='NA')segNA++;});
+  var tot=TACHES.length;
+
+  var h='';
+  h+='<div class="det-h"><p class="k">'+d.periode+' · échéance interne le '+d.ech+'</p>'
+    +'<h2>'+d.nom+'</h2>'
+    +'<div class="det-tags"><span class="tag cls">Classe '+d.classe+'</span><span class="tag">'+d.profils+'</span><span class="tag">'+d.regime+'</span></div></div>';
+
+  if(d.banner){
+    var bc = d.banner.g===1?C.g1:C.g2;
+    h+='<div class="banner"><span class="gbadge" style="background:'+bc+'">'+d.banner.g+'</span><p>'+d.banner.txt+'</p></div>';
+  }
+
+  h+='<div class="prog"><div class="prog-bar">'
+    +'<i style="width:'+(segF/tot*100)+'%;background:'+C.f+'"></i>'
+    +'<i style="width:'+(segEC/tot*100)+'%;background:'+C.ec+'"></i>'
+    +'<i style="width:'+(segNA/tot*100)+'%;background:'+C.na+'"></i>'
+    +'</div><span class="prog-txt"><b>'+c.done+'</b> / '+c.tot+' tâches</span></div>';
+
+  h+='<div class="blocs">';
+  ['A','B','C','D','E','F'].forEach(function(b){
+    h+='<p class="bloc-h">'+BLOCS[b]+'</p>';
+    TACHES.filter(function(t){return t[0]===b;}).forEach(function(t){
+      var code=t[1],s=d.etats[code];
+      var cls = (s==='F')?'done':(s==='NA'?'na':(blocking.indexOf(code)>=0?'blocking':''));
+      var sub = (s==='NA'&&d.na&&d.na[code]) ? '<span class="task-sub">Non applicable — '+d.na[code]+'</span>' : '';
+      h+='<div class="task '+cls+'">'
+        +'<span class="task-code">'+code+'</span>'
+        +'<span><span class="task-lib">'+t[2]+(t[3]===1&&s!=='F'&&s!=='NA'?'<span class="req">requis</span>':'')+'</span>'+sub+'</span>'
+        +'<button class="st" data-s="'+s+'" data-code="'+code+'">'+s+'</button></div>';
+    });
+  });
+  h+='</div>';
+
+  var why,ok=false;
+  if(blocking.length>0){
+    why='<b>'+blocking.length+' tâche'+(blocking.length>1?'s':'')+' requise'+(blocking.length>1?'s':'')+'</b> non renseignée'+(blocking.length>1?'s':'')+' : '+blocking.join(', ')+'. Une tâche non applicable doit être motivée pour lever le blocage.';
+  } else if(d.bloquante){
+    why='Toutes les tâches sont renseignées, mais <b>une alerte de gravité 1 reste ouverte</b> sur la période. La clôture reste bloquée tant qu\u2019elle n\u2019est pas traitée.';
+  } else {
+    why='<b>Prêt pour revue.</b> La période partira chez Valérie, qui dispose de la grille de revue de classe '+d.classe+'.';ok=true;
+  }
+  h+='<div class="foot"><button class="cta"'+(ok?'':' disabled')+'>Passer en revue</button>'
+    +'<p class="why'+(ok?' green':'')+'">'+why+'</p></div>';
+
+  document.getElementById('detail').innerHTML=h;
+
+  [].forEach.call(document.querySelectorAll('.st'),function(b){
+    b.addEventListener('click',function(){
+      var code=b.getAttribute('data-code');
+      var cur=d.etats[code];
+      d.etats[code] = cur==='N'?'EC':(cur==='EC'?'F':(cur==='F'?'N':'NA'));
+      renderFile();renderDetail();
+    });
+  });
+}
+
+/* ---------- modal ---------- */
+var BAN=['traite','traité','ok','fait','vu','ras','rien','na','n/a','-'];
+var curA=null;
+var veil=document.getElementById('veil'),motif=document.getElementById('motif'),
+    err=document.getElementById('err'),cnt=document.getElementById('cnt');
+
+function openModal(id){
+  curA=id;
+  var a=ALERTES.filter(function(x){return x.id===id;})[0];
+  document.getElementById('mref').textContent='Alerte '+a.ref+' · '+a.dossier;
+  motif.value='';err.className='err';cnt.textContent='0 caractère';
+  veil.className='veil on';motif.focus();
+}
+function closeModal(){veil.className='veil';curA=null;}
+
+motif.addEventListener('input',function(){
+  var n=motif.value.length;
+  cnt.textContent=n+' caractère'+(n>1?'s':'');
+  cnt.style.color = n>=20 ? C.f : '#7B8899';
+});
+document.getElementById('cancel').addEventListener('click',closeModal);
+veil.addEventListener('click',function(e){if(e.target===veil)closeModal();});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&veil.className.indexOf('on')>=0)closeModal();});
+
+document.getElementById('save').addEventListener('click',function(){
+  var v=motif.value.trim();
+  var norm=v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[.!]/g,'').trim();
+  if(BAN.indexOf(norm)>=0){
+    err.textContent='Ce motif est rejeté. « '+v+' » ne dit pas ce qui a été constaté ni ce qui a été fait. Décrivez la situation, pas le fait de l\u2019avoir traitée.';
+    err.className='err on';return;
+  }
+  if(v.length<20){
+    err.textContent='Motif trop court ('+v.length+' caractères sur 20 minimum). Il doit rester compréhensible par un tiers dans trois ans, sans le contexte que vous avez aujourd\u2019hui.';
+    err.className='err on';return;
+  }
+  closed[curA]=true;closeModal();renderAlertes();
+});
+
+renderFile();renderAlertes();renderDetail();
+})();
+</script>
+</body>
+</html>

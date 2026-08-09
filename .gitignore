@@ -4,10 +4,11 @@ node_modules/
 # Build output
 frontend/dist/
 
-# Environment
+# Environment (couvre .env, .env.local, .env.production, .env.bak.*, etc.)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.sample
 
 # Logs
 *.log
@@ -23,7 +24,15 @@ Thumbs.db
 
 # PM2
 .pm2/
-*.csv
+
+# Exports CSV ad hoc (ex. export_dossiers_*.csv à la racine)
+# Les CSV de données de référence versionnés (docs-production/seed/) sont
+# exclus par des exceptions explicites plus bas.
+/*.csv
+
+# Données de référence versionnées (lots production/supervision) :
+# les 6 fichiers seed sont indispensables au fonctionnement des migrations.
+!docs-production/seed/*.csv
 
 # Fichiers générés (uploads)
 backend/uploads/devis/*.pdf

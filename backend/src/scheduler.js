@@ -5,6 +5,7 @@ const { genererFacturesDepuisLDM } = require('./utils/facturation');
 const { injecterTachesLDM } = require('./routes/lettres');
 const ldmService = require('./services/ldmService');
 const { checkAndSendRelances: checkMicroRelances } = require('./routes/micro_relances');
+const { genererPeriodes } = require('./production/generer-periodes');
 
 // Réutilise la même logique d'activation que le webhook
 async function activerMissionSiComplete(ldmId) {
@@ -347,7 +348,20 @@ function startScheduler() {
     }
   });
 
-  console.log('[scheduler] Démarré — tache_retard @ 08:00, facture_impayee_30j @ 08:05, micro-relances @ 08:10, figeage_temps @ 02:00, powens_sync @ 03:30, yousign_poll @ toutes les heures');
+  // RG-03 — génération quotidienne des périodes de production.
+  // 05:00 : après les creux nocturnes système, avant l'arrivée des collaborateurs.
+  // Idempotent : relançable à la main via node src/jobs/generer-periodes.js.
+  cron.schedule('0 5 * * *', async () => {
+    console.log('[scheduler] Running generer_periodes');
+    try {
+      const r = await genererPeriodes(pool);
+      console.log(`[scheduler] generer_periodes: ${r.periodesCreees} période(s) créée(s), ${r.tachesCreees} tâche(s) instanciée(s), ${r.periodesExistantes} existante(s), ${r.periodesEcarteesPlancher} écartée(s) par le plancher, ${r.missionsIgnorees}/${r.missionsExaminees} mission(s) ignorée(s)`);
+    } catch (e) {
+      console.error('[scheduler] generer_periodes error:', e.message);
+    }
+  });
+
+  console.log('[scheduler] Démarré — tache_retard @ 08:00, facture_impayee_30j @ 08:05, micro-relances @ 08:10, figeage_temps @ 02:00, powens_sync @ 03:30, yousign_poll @ toutes les heures, generer_periodes @ 05:00');
 }
 
 module.exports = { startScheduler };
