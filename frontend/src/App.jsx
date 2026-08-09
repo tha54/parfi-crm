@@ -45,6 +45,7 @@ import MonPortefeuille from './pages/MonPortefeuille';
 import DevisDetail from './pages/DevisDetail';
 import LDMDetail from './pages/LDMDetail';
 import Onboarding from './pages/Onboarding';
+import OnboardingList from './pages/OnboardingList';
 import Appels from './pages/Appels';
 import ProspectsPipeline from './pages/ProspectsPipeline';
 import FeuilleDeTTemps from './pages/FeuilleDeTTemps';
@@ -159,6 +160,7 @@ function AppRoutes() {
       <Route path="/lettrage" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><Lettrage /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LettresMission /></AppLayout></ProtectedRoute>} />
       <Route path="/lettres-mission/:id" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><LDMDetail /></AppLayout></ProtectedRoute>} />
+      <Route path="/onboarding" element={<ProtectedRoute><AppLayout><OnboardingList /></AppLayout></ProtectedRoute>} />
       <Route path="/onboarding/:dossierId" element={<ProtectedRoute><AppLayout><Onboarding /></AppLayout></ProtectedRoute>} />
       <Route path="/prospects-pipeline" element={<ProtectedRoute roles={['expert', 'chef_mission']}><AppLayout><ProspectsPipeline /></AppLayout></ProtectedRoute>} />
       <Route path="/prospects" element={<Navigate to="/prospects-pipeline?tab=prospects" replace />} />
