@@ -167,3 +167,9 @@ CRM cabinet Parfi France (Longwy). Stack : React + Vite (nginx /dist), Express.j
 - `micro_devis_lignes` colonnes : `id`, `devis_id`, `libelle`, `description`, `quantite`, `unite`, `prix_unitaire`, `remise_pct`, `montant_ht`, `ordre`
 - `micro_factures_lignes` : même structure avec `facture_id` à la place de `devis_id`
 - Route `GET /devis/next-numero` **doit** être déclarée avant `GET /devis/:id` dans le fichier (sinon Express interprète "next-numero" comme un `:id`)
+
+## Module devis et lettres de mission
+Toute évolution du moteur de cotation, des devis ou des lettres de mission
+suit docs/spec-moteur-cotation.md. Ne pas improviser de règle métier : si la
+spécification ne couvre pas le cas, s'arrêter et le signaler.
+
