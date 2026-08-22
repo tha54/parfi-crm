@@ -39,8 +39,10 @@ CREATE TABLE parametre (
 ```
 
 Portée : taux horaires par niveau, cadences de saisie, prix unitaires (bulletin, ligne
-d'écriture), seuils de régime, forfait de mise en place, taux d'indexation annuelle.
-Aucune de ces valeurs n'apparaît ailleurs que dans cette table.
+d'écriture), seuils de régime, forfait de mise en place, taux d'indexation annuelle,
+plancher d'honoraires par dossier (code `PLANCHER_HONORAIRES_DOSSIER`, cf. § 4.2 : le
+paramètre est créé sans valeur, le montant reste à décider). Aucune de ces valeurs
+n'apparaît ailleurs que dans cette table.
 
 ### 2.2 Profil de dossier
 
@@ -73,8 +75,13 @@ CREATE TABLE profil_dossier (
 ```
 
 `statut_social_calcule` est recalculé à chaque écriture du profil, jamais saisi à la main.
-Le cas du gérant de SCI rémunéré reste en `AUCUN` avec un signalement à l'écran tant que
-la position de principe du cabinet n'est pas arrêtée.
+
+Cas particulier du gérant de SCI rémunéré (decisions.md §2) : la position du cabinet est
+arrêtée, aucune règle automatique n'est appliquée. Dès qu'une rémunération est renseignée
+sur ce profil, le champ passe en saisie manuelle avec un signalement à l'écran : la
+qualification (TNS, assimilé salarié, aucun) dépend de la qualité d'associé du gérant et
+relève d'une analyse au cas par cas. Valeur par défaut tant que rien n'est saisi : gérant
+non rémunéré, statut social `AUCUN`.
 
 ### 2.3 Volumétrie
 
@@ -142,29 +149,55 @@ héritée par une mesure.
 
 ### 2.4 Catalogue de tâches
 
+Deux axes distincts par tâche (decisions.md §3) : `mode_valorisation` détermine le prix,
+`mode_charge` détermine le temps prévisionnel. Le temps est calculé dans tous les cas
+(§ 3), y compris sur les lignes valorisées à la ligne ou au forfait unitaire, car il
+alimente le plan de charge et le calcul du taux horaire implicite (§ 4.1). En
+conséquence, `temps_standard` est renseigné pour toutes les tâches, quel que soit le
+mode de valorisation.
+
+Non-cumul, deux niveaux :
+- **Principe métier (decisions.md §3)** : une même écriture n'est jamais valorisée deux
+  fois, ni à la ligne et au volume, ni à la ligne et au temps.
+- **Règle d'implémentation** : un même journal ne porte qu'un seul mode de valorisation.
+  Plus strict que le principe, retenu pour la vérifiabilité et la lisibilité du devis.
+
+`VOLUME` ne figure pas dans `mode_valorisation`. Motif à consigner ici : la formule
+`quantité / cadence × taux` produit un temps qu'elle convertit en prix, c'est donc une
+valorisation au temps déguisée qui restitue automatiquement les gains de cadence au
+client — ce que decisions.md §3 écarte. Le champ `code_cadence` est conservé et rattaché
+à `mode_charge = CADENCE` : la cadence reste la source du temps prévisionnel et du taux
+horaire implicite sur les travaux de tenue.
+
+`LIGNE` et `FORFAIT_UNITAIRE` sont conservés distincts malgré leur mécanique de calcul
+commune (`quantité × prix_unitaire`), pour préserver la lisibilité du catalogue et
+permettre des règles de contrôle spécifiques (paramétrage, périodicité, blocs de texte).
+
 ```sql
 CREATE TABLE tache_catalogue (
-  code             VARCHAR(16) PRIMARY KEY,      -- aligné sur la nomenclature de suivi des temps
-  libelle_interne  VARCHAR(160) NOT NULL,
-  mission          ENUM('COMPTA','FISCAL','SOCIAL','JURIDIQUE','ACCOMPAGNEMENT') NOT NULL,
-  mode_cotation    ENUM('TEMPS','VOLUME','LIGNE','FORFAIT_UNITAIRE') NOT NULL,
-  code_cadence     VARCHAR(64) NULL,             -- → parametre (lignes/heure)
-  code_prix_unite  VARCHAR(64) NULL,             -- → parametre (€/unité)
-  temps_standard   SMALLINT NULL,                -- minutes, mode TEMPS
-  periodicite      ENUM('MENSUEL','TRIMESTRIEL','ANNUEL','CLOTURE','DATE_LEGALE','PONCTUEL'),
-  formule_quantite VARCHAR(255) NULL,            -- expression sur le profil
-  declencheur      VARCHAR(500) NOT NULL,        -- expression booléenne sur le profil
-  repartition      ENUM('CABINET','CLIENT','SANS_OBJET') DEFAULT 'CABINET',
-  affichage        ENUM('INTERNE','CLIENT') NOT NULL,
-  bloc_texte       VARCHAR(32) NULL,
-  actif            TINYINT(1) DEFAULT 1,
-  date_fin_validite DATE NULL                    -- élagage des dispositifs supprimés
+  code               VARCHAR(16) PRIMARY KEY,     -- aligné sur la nomenclature de suivi des temps
+  libelle_interne    VARCHAR(160) NOT NULL,
+  mission            ENUM('COMPTA','FISCAL','SOCIAL','JURIDIQUE','ACCOMPAGNEMENT') NOT NULL,
+  mode_valorisation  ENUM('TEMPS','LIGNE','FORFAIT_UNITAIRE') NOT NULL,   -- détermine le prix
+  mode_charge        ENUM('TEMPS_STANDARD','CADENCE') NOT NULL,           -- détermine le temps prévisionnel
+  code_cadence       VARCHAR(64) NULL,            -- → parametre (lignes/heure), rattaché à mode_charge = CADENCE
+  code_prix_unite    VARCHAR(64) NULL,            -- → parametre (€/unité), pour mode_valorisation = LIGNE ou FORFAIT_UNITAIRE
+  temps_standard     SMALLINT NULL,               -- minutes, renseigné pour toutes les tâches ; utilisé quand mode_charge = TEMPS_STANDARD
+  periodicite        ENUM('MENSUEL','TRIMESTRIEL','ANNUEL','CLOTURE','DATE_LEGALE','PONCTUEL'),
+  formule_quantite   VARCHAR(255) NULL,           -- expression sur le profil
+  declencheur        VARCHAR(500) NOT NULL,       -- expression booléenne sur le profil
+  repartition        ENUM('CABINET','CLIENT','SANS_OBJET') DEFAULT 'CABINET',
+  affichage          ENUM('INTERNE','CLIENT') NOT NULL,
+  bloc_texte         VARCHAR(32) NULL,
+  actif              TINYINT(1) DEFAULT 1,
+  date_fin_validite  DATE NULL                    -- élagage des dispositifs supprimés
 );
 
 CREATE TABLE tache_affectation (
   tache_code   VARCHAR(16) NOT NULL,
-  niveau       ENUM('ASSISTANT','COLLABORATEUR','COLLAB_SOCIAL','CHEF_MISSION','EXPERT_COMPTABLE') NOT NULL,
-  temps        SMALLINT NOT NULL,                -- minutes pour ce niveau
+  niveau       ENUM('COLLAB_JUNIOR','COLLAB_MEDIOR','COLLAB_SENIOR','CHEF_MISSION',
+                    'CHEF_GROUPE','COLLAB_SOCIAL','COLLAB_JURIDIQUE','EXPERT_COMPTABLE') NOT NULL,
+  temps        SMALLINT NOT NULL,                 -- minutes, calibré par couple tâche × niveau (decisions.md §4)
   PRIMARY KEY (tache_code, niveau)
 );
 ```
@@ -221,6 +254,10 @@ La lettre de mission lit `devis_ligne`, elle ne relance jamais le moteur.
 
 ## 3. Moteur de dérivation
 
+Le calcul du temps prévisionnel et le calcul du montant sont **deux étapes indépendantes**
+(decisions.md §3). Le temps est calculé pour toutes les tâches, quel que soit le mode de
+valorisation, afin d'alimenter le plan de charge et le taux horaire implicite.
+
 ```
 1. valider le profil (champs requis, cohérences impossibles)
 2. calculer les variables dérivées (statut social, obligations)
@@ -228,24 +265,66 @@ La lettre de mission lit `devis_ligne`, elle ne relance jamais le moteur.
 4. sélectionner les tâches : declencheur évalué sur le profil enrichi
    → aucune case à cocher ; la sélection manuelle n'est qu'un correctif tracé
 5. calculer la quantité de chaque tâche (formule_quantite ou périodicité)
-6. calculer temps et montant selon mode_cotation :
-     TEMPS            : Σ affectations (temps × taux[niveau]) × quantité
-     VOLUME           : quantité / cadence × taux[niveau]
+6. calculer le TEMPS prévisionnel de chaque tâche selon mode_charge
+   (calcul systématique, indépendant du mode_valorisation) :
+     TEMPS_STANDARD : Σ affectations (temps × quantité)
+     CADENCE        : quantité / cadence, temps réparti selon les affectations
+7. calculer le MONTANT de chaque tâche selon mode_valorisation :
+     TEMPS            : Σ affectations (temps × quantité × taux[niveau])
      LIGNE            : quantité × prix_unitaire
      FORFAIT_UNITAIRE : quantité × prix_unitaire
-7. appliquer forfait de mise en place, abonnements, remises
-8. produire l'instantané : devis_ligne + blocs de texte retenus + tableau de répartition
+8. appliquer forfait de mise en place, abonnements, remises
+9. calculer le taux horaire implicite du dossier
+   = honoraires_totaux_ht / temps_previsionnel_total (§ 4.1)
+10. produire l'instantané : devis_ligne + blocs de texte retenus + tableau de répartition
 ```
 
 Contrôles bloquants avant émission :
 - une périodicité affichée en page tarifaire diverge du tableau de répartition ;
 - une ligne affichée sans bloc de texte correspondant, ou l'inverse ;
 - une mention normative obligatoire absente ;
-- un montant total différent entre devis et lettre de mission.
+- un montant total différent entre devis et lettre de mission ;
+- deux modes de valorisation coexistant sur un même journal (§ 2.4, règle
+  d'implémentation) ;
+- honoraires totaux HT sous le plancher défini pour le dossier (§ 4.2), si le paramètre
+  `PLANCHER_HONORAIRES_DOSSIER` est renseigné.
 
 ---
 
-## 4. Cas de test d'acceptation
+## 4. Garde-fous économiques
+
+Conséquence directe de la séparation valorisation / charge (decisions.md §3), deux
+garde-fous à intégrer au calcul et au suivi.
+
+### 4.1 Taux horaire implicite
+
+Ratio défini au niveau du dossier :
+
+```
+taux_horaire_implicite = honoraires_totaux_ht / temps_previsionnel_total
+```
+
+Calculé à l'émission du devis (§ 3, étape 9), affiché sur le devis, puis suivi ensuite
+dossier par dossier à l'aune des temps réellement passés. Il monte quand l'automatisation
+produit ses effets ; sa baisse durable signale qu'il faut réviser le prix à la ligne ou
+les cadences. Indicateur central du dossier au sens de decisions.md §3.
+
+### 4.2 Plancher d'honoraires par dossier
+
+Un dossier à faible volume ne doit pas descendre sous le coût de sa révision et de sa
+supervision. Un paramètre nommé `PLANCHER_HONORAIRES_DOSSIER` est créé dans la table
+`parametre` (§ 2.1). Sa valeur reste à décider (§ 8) : aucun montant n'est fixé à ce
+stade, ni ici ni ailleurs.
+
+Comportement du moteur :
+- si le paramètre est absent ou sans valeur, aucun contrôle de plancher n'est appliqué ;
+- si le paramètre est renseigné, l'émission du devis est bloquée dès lors que les
+  honoraires totaux HT du dossier passent sous ce seuil, jusqu'à révision de la cotation
+  ou dérogation motivée et tracée.
+
+---
+
+## 5. Cas de test d'acceptation
 
 | Cas | Profil | Attendu |
 |---|---|---|
@@ -261,7 +340,7 @@ non-régression sur le texte et sur le montant).
 
 ---
 
-## 5. Phasage
+## 6. Phasage
 
 **Lot 1 — le socle de calcul.** Tables paramètres, profil, volumétrie, catalogue,
 affectations. Moteur de dérivation et de cotation. Écran de saisie du profil avec
@@ -280,7 +359,7 @@ l'interface, sans intervention en base.
 
 ---
 
-## 6. Migration du catalogue existant
+## 7. Migration du catalogue existant
 
 1. Extraire le catalogue actuel du module devis et le rapprocher de la nomenclature de
    suivi des temps, code par code.
@@ -296,11 +375,11 @@ Cible : quarante à soixante tâches vivantes.
 
 ---
 
-## 7. Ce qui reste à décider avant le lot 1
+## 8. Ce qui reste à décider avant le lot 1
 
-- Liste fermée des cas ouvrant droit au profil d'accompagnement allégé.
-- Position du cabinet sur le gérant de SCI rémunéré.
-- Maintien ou abandon d'une cotation à la ligne cumulée avec la cotation au volume sur les
-  mêmes journaux.
-- Niveaux d'intervenant retenus : cinq proposés, à confirmer par rapport à la réalité des
-  affectations du cabinet.
+- **Montant du plancher d'honoraires par dossier** (paramètre
+  `PLANCHER_HONORAIRES_DOSSIER`, § 4.2). Le paramètre est créé sans valeur ; aucun
+  montant n'est proposé dans cette spécification.
+- **Règle d'affectation par défaut entre `COLLAB_JUNIOR`, `COLLAB_MEDIOR` et
+  `COLLAB_SENIOR`** selon la complexité du dossier (decisions.md, section « Reste
+  ouvert »).

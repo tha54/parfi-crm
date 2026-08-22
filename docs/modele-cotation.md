@@ -100,34 +100,81 @@ assujettie. `operations_intracom` ajoute les états statistiques et récapitulat
 | `libelle_interne` | intitulé métier, jamais affiché au client |
 | `mission` | comptabilité, fiscalité, social, juridique, accompagnement |
 | `declencheur` | expression booléenne sur le profil (ex. `regime_tva = réel normal mensuel`) |
-| `mode_cotation` | au temps, au volume, à la ligne, au forfait unitaire |
-| `cadence` | pour le mode au volume : nombre de lignes traitées par heure |
+| `mode_valorisation` | au temps, à la ligne, au forfait unitaire — détermine le prix |
+| `mode_charge` | temps standard, ou cadence — détermine le temps prévisionnel |
+| `cadence` | lignes traitées par heure ; source du temps quand `mode_charge = cadence` |
 | `quantite` | fixe, ou formule sur la volumétrie |
 | `periodicite` | mensuelle, trimestrielle, annuelle, à la clôture, date légale, ponctuelle |
-| `temps_standard` | en minutes, calibré (§ 6) |
-| `prix_unitaire` | pour le mode au forfait unitaire (bulletin, acte, ligne) |
-| `niveau_intervenant` | assistant, collaborateur, collaborateur social, chef de mission, expert-comptable |
+| `temps_standard` | en minutes, calibré (§ 6). Renseigné pour toutes les tâches, y compris celles valorisées à la ligne ou au forfait unitaire, car il alimente le plan de charge |
+| `prix_unitaire` | pour les modes de valorisation « à la ligne » et « au forfait unitaire » |
+| `niveau_intervenant` | huit niveaux (§ 3.1) |
 | `repartition` | cabinet, client, sans objet |
 | `affichage` | interne (valorisation) ou client (répartition des travaux) |
 | `bloc_texte` | bloc de la lettre de mission auquel la tâche se rattache |
 
-Les quatre modes de cotation couvrent tous les cas :
-- **au temps** : durée fixe, indépendante du volume (révision, supervision, entretien) ;
-- **au volume** : durée = quantité / cadence (saisie des journaux) ;
-- **à la ligne** : prix unitaire par écriture (traitement informatisé) ;
+Chaque tâche porte deux axes distincts (decisions.md §3). Le mode de valorisation
+détermine le prix ; le mode de charge détermine le temps prévisionnel. Le temps est
+calculé dans tous les cas, y compris pour les tâches valorisées à la ligne ou au forfait
+unitaire, car il alimente le plan de charge et le taux horaire implicite (§ 5.1).
+
+**Modes de valorisation** (déterminent le prix) :
+- **au temps** : montant = temps × taux, réservé aux travaux non industrialisables
+  (révision, supervision, entretien de bilan, points sensibles) ;
+- **à la ligne** : prix unitaire par écriture, mode retenu pour les travaux de tenue ;
 - **au forfait unitaire** : prix par occurrence (bulletin de paie, acte juridique).
 
+Le mode « au volume » (`quantité / cadence × taux`) n'est **pas** un mode de
+valorisation. Motif : il produit un temps puis le convertit en prix, c'est donc une
+valorisation au temps déguisée, qui restitue automatiquement les gains de cadence au
+client — précisément ce que decisions.md §3 écarte. Les modes `à la ligne` et
+`au forfait unitaire` sont conservés distincts malgré leur mécanique commune
+(`quantité × prix unitaire`), pour la lisibilité du catalogue.
+
+**Modes de charge** (déterminent le temps prévisionnel, calculé dans tous les cas) :
+- **temps standard** : temps = `temps_standard` × quantité, réparti selon les
+  affectations ;
+- **cadence** : temps = quantité / `cadence`, réparti selon les affectations. Utilisé
+  pour les travaux de tenue valorisés à la ligne. Le champ `cadence` reste actif ici,
+  pour alimenter le temps prévisionnel et le taux horaire implicite.
+
+**Non-cumul**, à deux niveaux :
+- *Principe métier (decisions.md §3)* : une même écriture n'est jamais valorisée deux
+  fois, ni à la ligne et au volume, ni à la ligne et au temps ;
+- *Règle d'implémentation* : un même journal ne porte qu'un seul mode de valorisation.
+  Plus strict que le principe, retenu pour la vérifiabilité et la lisibilité du devis.
+
 Une même prestation peut mobiliser plusieurs niveaux d'intervenant. Elle reste **une
-ligne de catalogue** portant plusieurs affectations, et non quatre lignes distinctes :
+ligne de catalogue** portant plusieurs affectations, et non plusieurs lignes distinctes :
 l'entretien de bilan, c'est une prestation, avec une préparation et une présence pour le
 chef de mission et pour l'expert-comptable.
 
-Règles d'affectation par niveau :
-- saisie et tenue : assistant ;
-- cadrages, déclarations périodiques, travaux de bilan : collaborateur ;
-- paie et déclarations sociales : collaborateur social ;
-- révision, entretien de bilan, points sensibles : chef de mission ;
-- supervision et signature : expert-comptable, systématiquement.
+### 3.1 Niveaux d'intervenant
+
+Huit niveaux (decisions.md §4). Chaque niveau porte un taux horaire, logé dans les
+paramètres millésimés (§ 8). Le temps standard d'un même travail dépend du niveau qui
+l'exécute : il est donc porté par le couple tâche × niveau, non par la tâche seule.
+
+| Code | Libellé |
+|---|---|
+| `COLLAB_JUNIOR` | collaborateur junior |
+| `COLLAB_MEDIOR` | collaborateur médior |
+| `COLLAB_SENIOR` | collaborateur sénior |
+| `CHEF_MISSION` | chef de mission |
+| `CHEF_GROUPE` | chef de groupe |
+| `COLLAB_SOCIAL` | collaborateur social |
+| `COLLAB_JURIDIQUE` | collaborateur juridique |
+| `EXPERT_COMPTABLE` | expert-comptable |
+
+Règles d'affectation par nature de travail :
+- saisie et tenue : `COLLAB_JUNIOR`, `COLLAB_MEDIOR` ou `COLLAB_SENIOR` selon la
+  complexité (règle d'affectation par défaut à préciser, § 9) ;
+- cadrages, déclarations périodiques, travaux préparatoires de bilan : `COLLAB_MEDIOR`
+  ou `COLLAB_SENIOR` ;
+- paie, DSN, déclarations sociales : `COLLAB_SOCIAL` ;
+- actes, assemblées, formalités juridiques : `COLLAB_JURIDIQUE` ;
+- révision, entretien de bilan, points sensibles : `CHEF_MISSION` ;
+- pilotage transverse, arbitrages inter-missions : `CHEF_GROUPE` ;
+- supervision et signature : `EXPERT_COMPTABLE`, systématiquement.
 
 ---
 
@@ -141,10 +188,13 @@ facultatif conduit mécaniquement à sous-coter la mission réelle.
 Conséquences :
 - la mission `accompagnement` (révision, supervision, préparation et tenue de l'entretien
   de bilan) est cochée par défaut et ne peut être décochée que par exception motivée ;
-- `profil_accompagnement = allégé` est l'exception, réservée aux dossiers sans
-  exploitation ni décisions de gestion (SCI simple, société en sommeil, structure
-  patrimoniale sans salarié ni activité commerciale). Il retire l'entretien de bilan mais
-  conserve la révision et la supervision, qui ne se retirent jamais ;
+- `profil_accompagnement = allégé` est l'exception (decisions.md §1). Il est ouvert aux
+  dossiers réunissant **cumulativement** les trois critères suivants : aucun salarié,
+  aucune activité commerciale, résultat formé de flux récurrents sans décision de gestion
+  (loyers, dividendes). Cas visés : SCI patrimoniale, société en sommeil, holding
+  passive. Une entité présentant une exploitation, même modeste, reste en profil complet.
+  Le profil allégé retire l'entretien de bilan mais conserve la révision et la
+  supervision, qui ne se retirent jamais ;
 - côté document, l'entretien de bilan apparaît dans les inclus du forfait, pas dans une
   liste d'options. C'est un argument commercial, pas une ligne à négocier.
 
@@ -152,11 +202,24 @@ Conséquences :
 
 ## 5. Cotation
 
+Deux calculs **indépendants** (decisions.md §3), à mener sur chaque tâche du dossier :
+le temps prévisionnel selon le mode de charge, puis les honoraires selon le mode de
+valorisation.
+
+**Temps prévisionnel** (mode de charge, calculé pour toutes les tâches, alimente le plan
+de charge et le taux horaire implicite) :
+
 ```
-honoraires = Σ (lignes au temps      : temps_standard × quantité × taux[niveau])
-           + Σ (lignes au volume     : quantité / cadence × taux[niveau])
-           + Σ (lignes à la ligne    : quantité × prix_unitaire)
-           + Σ (lignes au forfait    : nombre × prix_unitaire)
+temps = Σ (tâches charge « temps standard » : temps_standard × quantité)
+      + Σ (tâches charge « cadence »        : quantité / cadence)
+```
+
+**Honoraires** (mode de valorisation) :
+
+```
+honoraires = Σ (tâches valorisation « au temps »       : temps × taux[niveau])
+           + Σ (tâches valorisation « à la ligne »      : quantité × prix_unitaire)
+           + Σ (tâches valorisation « au forfait »      : nombre × prix_unitaire)
            + abonnements et frais de dossier
            − prestations offertes
            + forfait de mise en place si premiere_annee
@@ -165,6 +228,32 @@ honoraires = Σ (lignes au temps      : temps_standard × quantité × taux[nive
 Les lignes de valorisation restent internes, les lignes affichées sont regroupées par
 mission. Le devis et la lettre de mission consomment le même calcul : un écart entre les
 deux documents est un défaut bloquant.
+
+### 5.1 Garde-fous économiques
+
+Conséquence directe de la séparation valorisation / charge (decisions.md §3), deux
+garde-fous à intégrer au devis et au suivi de dossier.
+
+**Taux horaire implicite** :
+
+```
+taux_horaire_implicite = honoraires / temps
+```
+
+Ratio calculé au niveau du dossier, affiché sur le devis, suivi ensuite dossier par
+dossier à l'aune des temps réellement passés. Indicateur central du dossier : il monte
+quand l'automatisation produit ses effets ; sa baisse durable signale qu'il faut réviser
+le prix à la ligne ou les cadences. C'est ce ratio, et non plus le temps facturé, qui
+mesure la rentabilité de la mission.
+
+**Plancher d'honoraires par dossier** : un dossier à faible volume ne doit pas descendre
+sous le coût de sa révision et de sa supervision. Un paramètre nommé
+`PLANCHER_HONORAIRES_DOSSIER` porte ce plancher dans la table des paramètres millésimés
+(§ 8). Sa valeur reste à décider (§ 9) : aucun montant n'est fixé à ce stade.
+
+Si le paramètre est renseigné, l'émission du devis est bloquée dès lors que les
+honoraires totaux HT passent sous ce seuil, jusqu'à révision de la cotation ou dérogation
+motivée et tracée.
 
 ---
 
@@ -215,8 +304,9 @@ jamais une valeur.
 
 ## 9. Points à trancher
 
-- Dossiers mixtes : une entité, plusieurs activités ou établissements.
-- Changement de régime en cours d'exercice : avenant automatique ou révision manuelle.
-- Rémunération du dirigeant TNS : quelle part de conseil est incluse au forfait.
-- Dossiers à dimension transfrontalière : bloc de texte et tâches spécifiques, à écrire.
-- Liste fermée des cas ouvrant droit au `profil_accompagnement = allégé`.
+- **Montant du plancher d'honoraires par dossier** (paramètre
+  `PLANCHER_HONORAIRES_DOSSIER`, § 5.1). Le paramètre est créé sans valeur ; aucun
+  montant n'est proposé dans ce modèle.
+- **Règle d'affectation par défaut entre `COLLAB_JUNIOR`, `COLLAB_MEDIOR` et
+  `COLLAB_SENIOR`** selon la complexité du dossier (decisions.md, section « Reste
+  ouvert »).
