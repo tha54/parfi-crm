@@ -246,6 +246,53 @@ les volumes annoncés.
   plus une liste fixe d'exclusions permanentes. Cette liste fixe reste à établir (cf.
   « Reste ouvert »).
 
+## 7. Missions ponctuelles, avenants et révision des honoraires
+
+**Prestations hors périmètre.** Une prestation hors du périmètre de la mission
+récurrente déclenche un devis complémentaire, *puis* une lettre de mission distincte
+pour cette prestation. **Jamais un avenant.** Motif à consigner : une prestation hors
+périmètre est une autre mission, avec sa nature propre, ses obligations
+professionnelles et ses clauses de responsabilité. La loger dans un avenant à la
+mission récurrente lui ferait hériter de clauses inadaptées.
+
+Aucun taux horaire n'est affiché dans la LDM récurrente : le barème reste fermé,
+cohérent avec la règle posée pour le devis (§6).
+
+**Rôle de l'avenant.** Restreint et distinct : modifier la mission existante — variation
+de volumes, ajout ou retrait d'une mission au périmètre, changement de périodicité.
+Deux objets, deux mécanismes, à ne jamais confondre dans le modèle.
+
+**Conséquence de modélisation : plusieurs LDM actives par dossier.** Un client porte
+une LDM récurrente et zéro à n LDM ponctuelles, simultanément actives. À répercuter
+sur :
+
+- la **facturation** : une LDM ponctuelle se facture à son propre rythme,
+  indépendamment de l'échéancier du récurrent ;
+- les **tâches** : générées par LDM, chacune avec son budget de temps ;
+- le **suivi de rentabilité** : celui d'une mission ponctuelle se juge séparément,
+  sans être agrégé au récurrent qu'elle masquerait ou dégraderait.
+
+**Révision annuelle des honoraires : clause de révision notifiée, jamais une clause
+d'indexation.** Mécanisme : le cabinet notifie le nouveau montant avant une date de
+référence, avec préavis. Le client dispose d'un délai pour refuser ; le refus ouvre
+une négociation ou la résiliation à l'échéance. À défaut de réponse dans le délai, le
+nouveau montant s'applique à la période suivante.
+
+Motif juridique à consigner : l'article L112-2 du code monétaire et financier
+interdit les indexations fondées sur le niveau général des prix ou des salaires ; une
+clause indexée sur l'inflation serait réputée non écrite, de même qu'une clause ne
+jouant qu'à la hausse (la réciprocité est exigée). Le mécanisme de notification
+n'étant pas automatique, il échappe à ce texte.
+
+La clause peut mentionner que la révision tient compte de l'évolution des charges du
+cabinet, sans renvoyer à aucun indice ni à aucun calcul automatique. Préavis et délai
+de réponse du client : paramètres nommés, sans valeur par défaut.
+
+**Clause distincte pour l'écart de volumes**, sur le même mécanisme de notification.
+Ne pas fusionner avec la précédente : l'une couvre l'évolution des charges du cabinet,
+l'autre l'évolution du périmètre réel. Seuil de déclenchement : paramètre sans valeur
+par défaut.
+
 ---
 
 ## Reste ouvert
@@ -261,3 +308,10 @@ les volumes annoncés.
 - Liste fixe d'exclusions permanentes du devis (§6, gabarit de référence) : à établir.
   Aucune source existante aujourd'hui, ni dans `descriptions-missions.md`, ni en base,
   ni en code.
+- Préavis et délai de réponse du client sur la révision notifiée (§7) : nombre de
+  jours à fixer, pour chacun des deux mécanismes (charges cabinet, écart de volumes).
+- Seuil d'écart de volumes déclenchant la clause de révision (§7) : à fixer.
+- Portée du gate de conformité (§5) pour une LDM ponctuelle sur client déjà connu :
+  contrôle intégral ou forme allégée. La vigilance LCB-FT étant continue, un contrôle
+  nul est exclu, mais la nature d'une mission exceptionnelle peut modifier
+  l'appréciation du risque.
