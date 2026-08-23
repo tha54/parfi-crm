@@ -197,6 +197,55 @@ Isoler une ligne, c'est la rendre retirable.
 **Rappel.** Le devis reste à la maille **mission**. Les tâches, les temps et les coûts
 de revient ne figurent jamais dans le document client.
 
+### Gabarit de référence
+
+Le devis PDF est validé dans la forme suivante, gabarit de référence pour la
+spécification.
+
+**En-tête.** Identité du cabinet, mention de l'inscription au tableau de l'Ordre,
+numéro de devis, date d'établissement.
+
+**Bloc 1 — Votre situation.** Société, activité, régime fiscal, effectif, date de
+clôture, périodicité de TVA. Présenté en grille compacte, pas en paragraphe.
+
+**Bloc 2 — Volumes retenus.** Un volume par ligne, avec sa périodicité. Immédiatement
+suivi de la mention de source, datée et typée : « Volumes déclarés par le client lors
+de l'entretien du JJ/MM/AAAA » ou « Volumes constatés sur pièces » en cas de reprise.
+Cette mention est générée depuis un champ du modèle, jamais saisie librement.
+
+**Bloc 3 — Nos prestations.** Une entrée par mission, chacune composée du libellé, du
+sous-total mensuel aligné à droite, et d'un paragraphe descriptif en langage client.
+Rédaction à la première personne du cabinet (« nous tenons », « nous établissons »),
+pas en style catalogue : le document se lit sans présence du cabinet.
+
+La révision, la supervision et l'entretien de bilan sont *décrits* à l'intérieur du
+paragraphe de la mission comptable et n'ont ni ligne ni montant propres. Règle déjà
+posée : une ligne isolée est une ligne retirable.
+
+**Bloc 4 — Total.** Montant mensuel HT en évidence, puis en second rang le montant
+annuel HT et TTC, puis les modalités de règlement.
+
+**Bloc 5 — Ce qui n'est pas compris.** Liste des exclusions de périmètre, en corps de
+texte normal, placée *avant* la conclusion et jamais en mention de bas de page. Motif à
+consigner : un client qui découvre une exclusion au moment où il la subit réagit plus
+mal que celui qui l'a lue d'emblée.
+
+**Bloc 6 — La suite.** Mention que la proposition n'a pas valeur de contrat, qu'une
+lettre de mission sera établie après accord, et que sa signature précède le démarrage
+des travaux. Puis durée de validité du devis et rappel que les honoraires reposent sur
+les volumes annoncés.
+
+**Contraintes transverses.**
+
+- Aucun prix unitaire, aucun temps, aucun coût de revient, aucune ligne de tâche ne
+  figure dans le document client.
+- Le contenu des blocs 1, 2, 3 et 4 est intégralement généré depuis les données du
+  dossier. Aucune saisie libre en dehors du champ de contexte de l'entretien.
+- Les paragraphes de mission proviennent de `descriptions-missions.md`.
+- Les exclusions du bloc 5 sont déduites des missions non retenues dans la cotation,
+  plus une liste fixe d'exclusions permanentes. Cette liste fixe reste à établir (cf.
+  « Reste ouvert »).
+
 ---
 
 ## Reste ouvert
@@ -209,3 +258,6 @@ de revient ne figurent jamais dans le document client.
 - Délai de relance des LDM envoyées et non signées (§5).
 - Seuil d'écart de volumes déclenchant un avenant au renouvellement annuel.
 - Durée de validité du devis (§6) : nombre de jours à fixer.
+- Liste fixe d'exclusions permanentes du devis (§6, gabarit de référence) : à établir.
+  Aucune source existante aujourd'hui, ni dans `descriptions-missions.md`, ni en base,
+  ni en code.
