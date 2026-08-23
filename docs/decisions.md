@@ -135,6 +135,31 @@ Conséquences système, non contournables :
 **LDM en cours de signature et changement de prix.** Une LDM partie en signature dont
 le prix change est annulée puis régénérée, jamais corrigée en place.
 
+**Onboarding client.** Le processus d'onboarding ne démarre qu'à la signature de la LDM.
+Il inclut les premiers travaux : aucun travail de mission avant signature. Ses tâches
+sont générées par le même déclencheur que les tâches récurrentes — la signature — avec
+leurs propres échéances, et alimentent le plan de charge du responsable de portefeuille.
+L'onboarding n'est pas une checklist ouverte à la main mais une conséquence automatique
+de la signature.
+
+Frontière matérielle, non chronologique. Est un travail de mission tout acte produisant
+un effet chez un tiers ou sur les comptes du client.
+
+- *Autorisé avant signature* (gestion interne, sans effet externe) : création de la
+  fiche prospect, saisie des coordonnées, dimensionnement, devis.
+- *Interdit avant signature* : ouverture du dossier dans Tiime, demande de mandat SEPA
+  ou d'accès bancaires, récupération des fichiers comptables du confrère, inscription à
+  l'annuaire de réception de facturation électronique, toute production comptable,
+  fiscale, sociale ou juridique.
+
+La lettre au confrère prédécesseur relève du gate d'acceptation de mission (ci-dessus),
+pas de l'onboarding : elle vérifie la possibilité de prendre le dossier, elle ne
+l'exécute pas.
+
+Le blocage est structurel, non déclaratif. Ces actions ne sont pas proposées dans
+l'interface tant que la LDM n'est pas signée — pas d'avertissement contournable, pas de
+bouton grisé avec message : absence de commande.
+
 ---
 
 ## Reste ouvert
