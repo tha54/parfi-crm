@@ -160,6 +160,43 @@ Le blocage est structurel, non déclaratif. Ces actions ne sont pas proposées d
 l'interface tant que la LDM n'est pas signée — pas d'avertissement contournable, pas de
 bouton grisé avec message : absence de commande.
 
+## 6. Structure et contenu du devis
+
+**Format retenu :** volumes visibles + sous-totaux par mission. Les prix unitaires ne
+sont **jamais** affichés. Motif à consigner : les volumes justifient le prix et rendent
+la révision annuelle constatable, tandis que le barème unitaire reste couvert — actif
+commercial du cabinet, et exposition directe à la comparaison confrère.
+
+**Usage.** PDF envoyé après l'entretien de découverte. Le client le lit seul. Le
+document doit donc se justifier sans présence du cabinet, ce qui commande sa structure.
+
+**Structure en six blocs :**
+
+1. **Restitution de la situation du client** — forme juridique, activité, régime fiscal
+   et de TVA, effectif, date de clôture. Preuve que la cotation répond au dossier et
+   non à un tarif de catalogue.
+2. **Volumes retenus**, avec source et date : « déclarés par le client lors de
+   l'entretien du JJ/MM/AAAA » ou « constatés sur pièces » en cas de reprise. La source
+   est un champ du modèle, pas une mention libre.
+3. **Missions**, un paragraphe chacune en langage client (source
+   `descriptions-missions.md`), avec sous-total par mission.
+4. **Récapitulatif honoraires** : mensuel et annuel, HT et TTC, modalités de règlement.
+5. **Ce qui n'est pas compris** : exclusions explicites de périmètre.
+6. **Suite du parcours** : mention que le devis n'a pas valeur de contrat et qu'une
+   lettre de mission sera établie et signée avant tout travail.
+
+En complément : durée de validité du devis (paramétrable, sans valeur par défaut) et
+mention que le prix est établi sur la base des volumes annoncés.
+
+**Règle d'agrégation.** Les composantes indissociables du socle — révision, supervision,
+entretien de bilan — n'apparaissent **pas** en ligne autonome avec montant propre. Elles
+sont décrites dans le paragraphe de la mission comptable et incluses dans son
+sous-total. Motif : un client doit pouvoir renoncer au social, jamais à la révision.
+Isoler une ligne, c'est la rendre retirable.
+
+**Rappel.** Le devis reste à la maille **mission**. Les tâches, les temps et les coûts
+de revient ne figurent jamais dans le document client.
+
 ---
 
 ## Reste ouvert
@@ -171,3 +208,4 @@ bouton grisé avec message : absence de commande.
   envoi en signature.
 - Délai de relance des LDM envoyées et non signées (§5).
 - Seuil d'écart de volumes déclenchant un avenant au renouvellement annuel.
+- Durée de validité du devis (§6) : nombre de jours à fixer.
